@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="bluepaper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Fukuhara Research Seminar{% endblock %} · Fukuhara Seminar</title>
+  <meta name="theme-color" content="#eaf1fb">
+  {# HTMX normally ignores error replies (4xx/5xx). This makes it show them
+     too: forms come back with their error, and other errors as a pop-up. #}
+  <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "[45]..", "swap": true, "error": true}]}'>
+
+  <!-- IBM Plex Mono (Latin) and IBM Plex Sans JP (Japanese) from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS + daisyUI, built ahead of time from tailwind.input.css -->
+  <link href="{{ static_url('tailwind.css') }}" rel="stylesheet">
+  <!-- The "bluepaper" look: borders, shadows, the moving grid, animations -->
+  <link href="{{ static_url('theme.css') }}" rel="stylesheet">
+  <!-- Hides elements marked x-cloak until Alpine.js has loaded -->
+  <style>[x-cloak] { display: none !important; }</style>
+
+  <!-- HTMX: HTML attributes like hx-post fetch and swap content from the server -->
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <!-- Alpine.js: small interactions (open a pop-up, switch a form) written as HTML attributes -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+{# Signed-in pages put this sign-in's CSRF token in a header that every
+   HTMX request sends (see security.py). #}
+<body class="min-h-screen font-sans antialiased"
+      {% if viewer %}hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'{% endif %}>
+
+  {% if viewer %}
+  <nav class="navbar flex-wrap gap-2 border-b-[1.5px] border-base-content bg-base-200/80 px-4">
+    <div class="flex-1 min-w-0">
+      <a href="/classes" class="font-bold tracking-tight truncate">Fukuhara<span class="hidden sm:inline"> Research</span> Seminar</a>
+    </div>
+    <div class="flex flex-wrap items-center gap-1 text-sm">
+      <a href="/classes" class="btn btn-ghost btn-sm">Classes</a>
+      {% if viewer.is_admin %}<a href="/members" class="btn btn-ghost btn-sm">Members</a>{% endif %}
+      {% if viewer.is_member %}
+        <a href="/account" class="btn btn-ghost btn-sm" title="Your account">{{ viewer.user.full_name }}</a>
+      {% else %}
+        <span class="badge badge-outline" title="Guests can look around, read-only, with limited detail">Guest · limited viewing</span>
+      {% endif %}
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn btn-ghost btn-sm">{{ "Log out" if viewer.is_member else "Leave" }}</button>
+      </form>
+    </div>
+  </nav>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+
+  <!-- Pop-up windows (forms, confirmations) are loaded into here by HTMX. -->
+  <div id="modal"></div>
+  <!-- Pop-up messages ("toasts") appear here, bottom-right. -->
+  <div id="toasts" class="toast toast-end z-[60] max-lg:mb-24" aria-live="polite"></div>
+
+  <script src="{{ static_url('ui.js') }}"></script>
+</body>
+</html>

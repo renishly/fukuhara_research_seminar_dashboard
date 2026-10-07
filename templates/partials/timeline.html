@@ -1,0 +1,58 @@
+{# The inside of the timeline frame: positions in pixels come from timeline.py.
+   data-* values let ui.js centre the view and tell the zoom buttons the date
+   in the middle. #}
+{% set t = timeline %}
+<div class="tl-canvas" style="width: {{ t.width }}px; height: {{ t.height }}px"
+     data-center-x="{{ t.center_x }}" data-today-x="{{ t.today_x }}"
+     data-first-month="{{ t.first_month }}" data-px-per-month="{{ t.px_per_month }}">
+
+  {% for month in t.months %}
+  <div class="tl-month-line" style="left: {{ month.left }}px; height: {{ t.height }}px"></div>
+  {% endfor %}
+
+  <div class="tl-axis" style="top: {{ t.axis_top }}px; height: {{ axis_height }}px" aria-hidden="true">
+    {% for month in t.months %}
+    <div class="tl-month" style="left: {{ month.left }}px; width: {{ t.px_per_month }}px">
+      {{ month.label if t.px_per_month >= 60 else month.label[0] }}{% if month.year %} <strong>{{ month.year }}</strong>{% endif %}
+    </div>
+    {% endfor %}
+    {# A tick on every Friday (seminar day), with its date when there's room. #}
+    {% for friday in t.fridays %}
+    <span class="tl-friday" style="left: {{ friday.left }}px" title="Fri {{ friday.day.strftime('%Y-%m-%d') }}">
+      {%- if t.px_per_month >= 100 %}<span>{{ friday.day.day }}</span>{% endif -%}
+    </span>
+    {% endfor %}
+  </div>
+
+  <div class="tl-today" style="left: {{ t.today_x }}px; height: {{ t.height }}px">
+    {# Today's day and time in Japan. Alpine keeps the time ticking without reloading. #}
+    <span x-data="{ now: '{{ now_label }}' }"
+          x-init="setInterval(() => now = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Tokyo',
+                  weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit',
+                  minute: '2-digit', hour12: false }).replace(/,/g, '') + ' JST', 15000)"
+          x-text="now">{{ now_label }}</span>
+  </div>
+
+  {% for item in boxes %}
+  {% set box, course = item.box, item.course %}
+  {# The dashed lines mark the class's months, from the box to the axis. #}
+  <div class="tl-connector" aria-hidden="true"
+       style="left: {{ box.left }}px; width: {{ box.span_width }}px; top: {{ box.connector_top }}px; height: {{ box.connector_height }}px"></div>
+  <a href="/classes/{{ course.id }}" class="tl-box lift {{ 'ended' if item.ended }}"
+     style="left: {{ box.left }}px; top: {{ box.top }}px; width: {{ box.width }}px; height: {{ box_height }}px">
+    <span class="tl-span" style="width: {{ box.span_width }}px; {{ 'bottom: 0' if box.above else 'top: 0' }}"></span>
+    {% if item.unseen %}
+    {# Someone submitted something since you last opened this class. #}
+    <span class="tl-new" role="img" aria-label="New submissions you haven't seen" title="New submissions you haven't seen">!</span>
+    {% endif %}
+    <span class="flex items-start gap-1 {{ 'pr-5' if item.unseen }}">
+      <strong class="min-w-0 flex-1 truncate" title="{{ mask(course_name(course)) }}">{{ mask(course_name(course)) }}</strong>
+      {% if item.enrolled %}<span class="badge badge-secondary badge-xs shrink-0">Enrolled</span>{% endif %}
+      {% if item.ended %}<span class="badge badge-outline badge-xs shrink-0">Ended</span>{% endif %}
+    </span>
+    <span class="text-xs text-base-content/70">{{ timespan_label(course) }}</span>
+    <span class="line-clamp-2 whitespace-pre-line text-xs">{{ mask(item.lines) }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% if oob %}{% include "partials/zoom_controls.html" %}{% endif %}

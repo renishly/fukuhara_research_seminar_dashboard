@@ -1,0 +1,18 @@
+{# How an assignment's, exam's or submission's content is shown: its text
+   (always as plain text, never as HTML), or its file with a download link.
+   Images (PNG, JPEG, GIF, WebP) are also shown. Text is passed through mask(),
+   which hides students' names from guests. #}
+{% macro show(item, files, mask) %}
+  {% if item.content_text is not none %}
+    <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 text-sm font-sans">{{ mask(item.content_text) }}</pre>
+  {% elif item.file_id and files.get(item.file_id) %}
+    {% set f = files[item.file_id] %}
+    {% if f.content_type in ("image/png", "image/jpeg", "image/gif", "image/webp") %}
+    <a href="/files/{{ f.id }}" target="_blank" class="block w-fit">
+      <img src="/files/{{ f.id }}" alt="{{ f.filename }}" loading="lazy" class="max-h-64 border border-base-content/40">
+    </a>
+    {% endif %}
+    <p class="text-sm">&#128206; <a href="/files/{{ f.id }}" class="link break-all">{{ f.filename }}</a>
+      <span class="text-xs text-base-content/60">({{ f.size | human_size }})</span></p>
+  {% endif %}
+{% endmacro %}

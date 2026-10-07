@@ -1,0 +1,34 @@
+# Render Blueprint: tells Render what to create when you click "New > Blueprint".
+# Reference: https://render.com/docs/blueprint-spec
+#
+# Render only runs the website. The database and file storage are a free
+# Supabase project (see the README); their addresses and keys are secrets you
+# type into Render, never written in this file or in GitHub.
+services:
+  - type: web
+    name: fukuhara-seminar
+    runtime: python
+    region: singapore  # the closest Render region to Japan
+    plan: free  # sleeps when idle; the first visit after a while takes about a minute
+    branch: main  # every push to main redeploys the site
+    buildCommand: pip install -r requirements.txt
+    startCommand: fastapi run main.py --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: SUPABASE_BUCKET
+        value: seminar-files
+      # sync: false = Render asks you to type these in when you create the
+      # Blueprint (or set them later under the service's Environment tab).
+      - key: DATABASE_URL  # Supabase's "Session pooler" string, ending in ?sslmode=require
+        sync: false
+      - key: SUPABASE_URL  # e.g. https://abcdefghijkl.supabase.co
+        sync: false
+      - key: SUPABASE_SERVICE_KEY  # the secret service key: never in the browser or the repository
+        sync: false
+      - key: ADMIN_REGISTRATION_KEY  # keep private
+        sync: false
+      - key: STUDENT_REGISTRATION_KEY  # change it each year
+        sync: false
+      - key: KEY_ENCRYPTION_SECRET  # a Fernet key; encrypts agents' API keys
+        sync: false

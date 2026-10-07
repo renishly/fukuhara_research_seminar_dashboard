@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ mask(course_name(course)) }}{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-[1400px] space-y-8 px-4 py-8">
+  <header class="space-y-3">
+    <a href="/classes" class="btn btn-ghost btn-sm -ml-3">&larr; Classes</a>
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0 space-y-1">
+        <h1 class="page-title text-3xl font-bold tracking-tight break-words">{{ mask(course_name(course)) }}</h1>
+        <p class="text-sm text-base-content/70">
+          {{ timespan_label(course) }}
+          {% if ended %}<span class="badge badge-outline badge-sm ml-1">Ended</span>{% endif %}
+          {% if course.hidden_from_guests and viewer.is_member %}<span class="badge badge-outline badge-sm ml-1">Hidden from guests</span>{% endif %}
+          &middot; Enrolled: {{ summary }}
+        </p>
+      </div>
+      {% if can_manage %}
+      <div class="flex gap-2" x-data="{ deleting: false }">
+        <button type="button" class="btn btn-sm" hx-get="/classes/{{ course.id }}/edit" hx-target="#modal">Edit</button>
+        <button type="button" class="btn btn-sm btn-error btn-outline" @click="deleting = true">Delete</button>
+        {# Delete: a confirmation that needs the admin's own password. #}
+        <template x-if="deleting">
+          <div class="modal modal-open" @keydown.escape.window="deleting = false">
+            <div class="modal-box">
+              <h3 class="text-lg font-bold">Delete this class?</h3>
+              <form class="space-y-3 pt-3" hx-post="/classes/{{ course.id }}/delete" hx-target="#delete-class-result">
+                <p class="text-sm">This permanently deletes <strong>{{ course_name(course) }}</strong> with all its
+                  assignments, exams, submissions, agents and files. <strong>This can't be undone.</strong></p>
+                <fieldset class="fieldset">
+                  <legend class="fieldset-legend">Your password</legend>
+                  <input type="password" name="password" required autocomplete="current-password" class="input w-full">
+                </fieldset>
+                <div id="delete-class-result" aria-live="polite"></div>
+                <div class="modal-action">
+                  <button type="button" class="btn btn-ghost" @click="deleting = false">Cancel</button>
+                  <button type="submit" class="btn btn-error">Delete permanently</button>
+                </div>
+              </form>
+            </div>
+            <div class="modal-backdrop" @click="deleting = false"></div>
+          </div>
+        </template>
+      </div>
+      {% endif %}
+    </div>
+    <p class="max-w-prose whitespace-pre-line break-words">{{ mask(course.description) }}</p>
+  </header>
+
+  {% include "partials/tab.html" %}
+</main>
+{% endblock %}

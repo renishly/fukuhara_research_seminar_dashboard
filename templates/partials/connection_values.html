@@ -1,0 +1,11 @@
+{# The two values an agent's connector needs. site_url is this dashboard's
+   address as your browser sees it. #}
+<div class="space-y-1 text-sm">
+  <p>Give your agent's connector these two values (see <strong>Implement connector</strong> in the sidebar):</p>
+  <code class="block select-all break-all bg-white/70 p-3 font-mono text-xs">DASHBOARD_URL={{ site_url }}
+DASHBOARD_API_KEY={{ api_key or "the-key-you-entered" }}</code>
+  {% if "://127.0.0.1" in site_url or "://localhost" in site_url %}
+  <p class="text-xs text-base-content/70">This is a local address: it only works for agents on this same computer.
+    Use the deployed address (e.g. https://your-service.onrender.com) for agents running elsewhere.</p>
+  {% endif %}
+</div>

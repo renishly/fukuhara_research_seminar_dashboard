@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% import "partials/icons.html" as icon %}
+{% block title %}{{ agent.name }} · Agent{% endblock %}
+{% block content %}
+{# Layout: Monitor, Outputs and Activity in the main column. The owner's
+   Controls sit in a right-hand column that stays in view on wide screens,
+   and in a bar fixed to the bottom of the screen on phones. #}
+<main class="mx-auto max-w-6xl px-4 py-8 {{ 'pb-32 lg:pb-8' if is_owner }}">
+  <div class="mb-8">
+    <a href="{{ back_url }}" class="btn btn-ghost btn-sm -ml-3 mb-2">&larr; {{ who(owner) }}'s agents</a>
+    {% include "partials/agent_header.html" %}
+  </div>
+
+  <div class="{{ 'lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-8' if is_owner }}">
+    <div class="min-w-0 space-y-8">
+      {% with oob=False %}{% include "partials/monitor.html" %}{% endwith %}
+      {% include "partials/outputs.html" %}
+      <section class="card">
+        <div class="card-body gap-4">
+          <h2 class="card-title">Activity</h2>
+          <div hx-get="/agents/{{ agent.id }}/events" hx-trigger="load, every 3s [document.visibilityState === 'visible']"
+               hx-include="#events-seen">
+            <input type="hidden" id="events-seen" name="seen" value="">
+            <div class="flex justify-center py-8"><span class="loading loading-dots loading-lg"></span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    {% if is_owner %}
+    <aside class="hidden lg:sticky lg:top-6 lg:block" aria-label="Controls" x-data>
+      <section class="card">
+        <div class="card-body gap-4">
+          <h2 class="card-title">Controls</h2>
+          <div class="grid grid-cols-3 gap-2">
+            <button class="btn btn-start" aria-label="Start" title="Start" hx-post="/agents/{{ agent.id }}/command"
+                    hx-vals='{"command": "start"}' hx-target="#toasts" hx-swap="beforeend">{{ icon.play() }}</button>
+            <button class="btn btn-pause" aria-label="Pause" title="Pause" hx-post="/agents/{{ agent.id }}/command"
+                    hx-vals='{"command": "pause"}' hx-target="#toasts" hx-swap="beforeend">{{ icon.pause() }}</button>
+            <button type="button" class="btn gap-1" aria-label="Inbox: upload files for this agent" title="Inbox: upload files for this agent"
+                    @click="$dispatch('open-inbox')">{{ icon.inbox() }}{% if inbox %}<span class="badge badge-sm">{{ inbox | length }}</span>{% endif %}</button>
+          </div>
+          {% if agent.accepts_messages %}
+          <form class="space-y-2" hx-post="/agents/{{ agent.id }}/command" hx-vals='{"command": "message"}'
+                hx-target="#toasts" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) this.reset()">
+            <textarea name="text" required rows="3" autocomplete="off" placeholder="Send a message to the agent…"
+                      class="textarea w-full" aria-label="Message to the agent"></textarea>
+            <button type="submit" class="btn btn-primary w-full" aria-label="Send" title="Send">{{ icon.send() }}</button>
+          </form>
+          {% else %}
+          <div class="space-y-2" aria-disabled="true">
+            <textarea rows="3" disabled placeholder="Messages are off for this agent" class="textarea w-full"
+                      aria-label="Message to the agent (off)"></textarea>
+            <button type="button" class="btn w-full" disabled aria-label="Send (messages are off)" title="Send (messages are off)">{{ icon.send() }}</button>
+            <p class="text-xs text-base-content/70">This agent hasn't said it accepts messages. Its code switches them on with <code>accept_messages(...)</code>.</p>
+          </div>
+          {% endif %}
+          <p class="text-xs text-base-content/70"><strong>Pause</strong> holds the agent's outputs and monitor updates until
+            <strong>Start</strong>; agents using <code>wait_if_paused()</code> also stop working. These reach the agent at its next check-in ({{ check_in }}).</p>
+        </div>
+      </section>
+    </aside>
+    {% endif %}
+  </div>
+</main>
+
+{# Reloads the page if the agent starts or stops accepting messages, so the
+   message box switches on or off (the server answers "nothing changed" otherwise). #}
+<div hx-get="/agents/{{ agent.id }}/messages-ready?ready={{ 'true' if agent.accepts_messages else 'false' }}"
+     hx-trigger="every 5s [document.visibilityState === 'visible']" hx-swap="none"></div>
+
+{% if is_owner %}
+<div x-data="{ open: false, progress: null }" @open-inbox.window="open = true" @keydown.escape.window="open = false">
+  <div id="inbox-window" class="modal" :class="{ 'modal-open': open }">
+    <div class="modal-box max-w-lg space-y-4">
+      <h3 class="text-lg font-bold">Inbox</h3>
+      <p class="text-sm">Upload files for <strong>{{ agent.name }}</strong>, up to {{ inbox_max }} each. They wait here until it
+        takes them at a check-in ({{ check_in }}), then they're deleted from the dashboard. Only this agent (and you) can see them.</p>
+      {% if not agent.accepts_inbox %}
+      <div role="alert" class="alert alert-warning alert-soft text-sm">
+        <span>This agent hasn't switched its Inbox on yet (<code>accept_inbox(...)</code> in the connector), so uploads are off until it does.</span>
+      </div>
+      {% endif %}
+      <form class="space-y-2" hx-post="/agents/{{ agent.id }}/inbox" hx-encoding="multipart/form-data" hx-target="#inbox-list"
+            x-on:htmx:xhr:progress="progress = $event.detail.total ? Math.round($event.detail.loaded / $event.detail.total * 100) : null"
+            x-on:htmx:after-request="progress = null; if ($event.detail.successful) $el.reset()">
+        <fieldset class="space-y-2" {{ 'disabled' if not agent.accepts_inbox }}>
+          <input type="file" name="files" multiple required class="file-input w-full" aria-label="Files to upload">
+          <textarea name="note" rows="2" maxlength="1000" placeholder="A note for the agent (optional)" class="textarea w-full"
+                    aria-label="Note for the agent"></textarea>
+          <progress x-show="progress !== null" x-cloak class="progress w-full" :value="progress" max="100"></progress>
+          <button type="submit" class="btn btn-primary w-full gap-2">{{ icon.inbox() }} Upload</button>
+        </fieldset>
+      </form>
+      <section class="space-y-1">
+        <h4 class="font-semibold">Waiting</h4>
+        <div id="inbox-list" hx-get="/agents/{{ agent.id }}/inbox" hx-include="#inbox-seen"
+             hx-trigger="every 5s [document.visibilityState === 'visible' && !!document.querySelector('#inbox-window.modal-open')]">
+          {% include "partials/inbox_list.html" %}
+          <input type="hidden" id="inbox-seen" name="seen" value="">
+        </div>
+      </section>
+      <div class="modal-action mt-0"><button type="button" class="btn" @click="open = false">Close</button></div>
+    </div>
+    <div class="modal-backdrop" @click="open = false"></div>
+  </div>
+</div>
+
+{# Controls on phones: Start, Pause, Inbox, Message. The message box opens above the buttons. #}
+<div class="fixed inset-x-0 bottom-0 z-30 border-t-[1.5px] border-base-content bg-base-100 p-3 lg:hidden"
+     x-data="{ writing: false }" aria-label="Controls">
+  {% if agent.accepts_messages %}
+  <form x-show="writing" x-cloak class="mb-2 flex gap-2" hx-post="/agents/{{ agent.id }}/command" hx-vals='{"command": "message"}'
+        hx-target="#toasts" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) this.reset()">
+    <input type="text" name="text" required autocomplete="off" x-ref="message" placeholder="Send a message to the agent…"
+           class="input input-sm flex-1" aria-label="Message to the agent">
+    <button type="submit" class="btn btn-primary btn-sm" aria-label="Send" title="Send">{{ icon.send("size-4") }}</button>
+  </form>
+  {% endif %}
+  <div class="grid grid-cols-4 gap-2">
+    <button class="btn btn-start btn-sm" aria-label="Start" title="Start" hx-post="/agents/{{ agent.id }}/command"
+            hx-vals='{"command": "start"}' hx-target="#toasts" hx-swap="beforeend">{{ icon.play("size-4") }}</button>
+    <button class="btn btn-pause btn-sm" aria-label="Pause" title="Pause" hx-post="/agents/{{ agent.id }}/command"
+            hx-vals='{"command": "pause"}' hx-target="#toasts" hx-swap="beforeend">{{ icon.pause("size-4") }}</button>
+    <button type="button" class="btn btn-sm gap-1" aria-label="Inbox: upload files for this agent" title="Inbox"
+            @click="$dispatch('open-inbox')">{{ icon.inbox("size-4") }}{% if inbox %}<span class="badge badge-xs">{{ inbox | length }}</span>{% endif %}</button>
+    {% if agent.accepts_messages %}
+    <button type="button" class="btn btn-sm" :class="{ 'btn-active': writing }" aria-label="Message" title="Message"
+            @click="writing = !writing; $nextTick(() => writing && $refs.message.focus())">{{ icon.message("size-4") }}</button>
+    {% else %}
+    <button type="button" class="btn btn-sm" disabled aria-label="Message (off: this agent hasn't said it accepts messages)"
+            title="This agent hasn't said it accepts messages">{{ icon.message("size-4") }}</button>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

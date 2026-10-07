@@ -1,0 +1,46 @@
+{% extends "partials/modal.html" %}
+{# The assignment/exam form (admins). Content is text OR a file, chosen with
+   the switch. On a problem the server sends this pop-up back with the error. #}
+{% block body %}
+{% set v = values %}
+<form class="space-y-3" hx-post="{{ '/tasks/%d/edit' % task.id if task else '/classes/%d/%s' % (course.id, kinds) }}"
+      hx-encoding="multipart/form-data" hx-target="closest .modal" hx-swap="outerHTML"
+      x-data="{ mode: '{{ v.mode }}' }">
+  <h3 class="text-lg font-bold">{{ ("Edit " if task else "New ") ~ kind }}</h3>
+  {% if error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>{% endif %}
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Title</legend>
+    <input type="text" name="title" value="{{ v.title }}" required maxlength="200" class="input w-full">
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Description (optional)</legend>
+    <textarea name="description" rows="3" maxlength="5000" class="textarea w-full">{{ v.description }}</textarea>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Due date and time (JST)</legend>
+    <input type="datetime-local" name="due_at" value="{{ v.due_at }}" required class="input w-full">
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Content</legend>
+    <div class="join">
+      <input type="radio" name="mode" value="text" aria-label="Text" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
+      <input type="radio" name="mode" value="file" aria-label="File" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+    </div>
+    <textarea x-show="mode === 'text'" name="content_text" rows="6" maxlength="50000" class="textarea mt-2 w-full"
+              placeholder="The {{ kind }} itself">{{ v.content_text }}</textarea>
+    <div x-show="mode === 'file'" x-cloak class="mt-2 space-y-1">
+      <input type="file" name="file" class="file-input w-full">
+      <p class="label whitespace-normal">Up to 50 MB.{% if current_file %} Now: <strong>{{ current_file.filename }}</strong> (choose a file to replace it).{% endif %}</p>
+    </div>
+  </fieldset>
+  <label class="flex cursor-pointer items-start gap-2 text-sm">
+    <input type="checkbox" name="guest_visible" value="true" class="checkbox checkbox-sm mt-0.5" {{ 'checked' if v.guest_visible }}>
+    <span><strong>Visible to guests.</strong> Names in text are hidden from guests automatically,
+      but <strong>names inside a file are not</strong>: files are shown exactly as uploaded.</span>
+  </label>
+  <div class="modal-action">
+    <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
+    <button type="submit" class="btn btn-primary">{{ "Save" if task else "Post " ~ kind }}</button>
+  </div>
+</form>
+{% endblock %}

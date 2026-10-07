@@ -1,0 +1,596 @@
+/* =============================================================================
+   The site's look: "bluepaper"
+   Navy monospace ink on pale blueprint paper, see-through blue cards with thin
+   navy borders and hard square shadows, cobalt and sky for highlights.
+   Adapted from the earlier project's "codepaper" theme.
+
+   This file only changes how things look and move. Positions and behaviour
+   come from the templates. The colours themselves are the daisyUI theme
+   "bluepaper" in tailwind.input.css; this file adds borders, shadows, the
+   moving background grid, the timeline and student window, and animations.
+   ============================================================================= */
+
+:root {
+  --ink: #0b1f3a;        /* navy: text, borders, lines, shadows */
+  --paper: #eaf1fb;      /* pale blueprint paper: the page */
+  --card: #d7e5f8;       /* a slightly deeper blue paper: cards, pop-ups */
+  --cobalt: #2f5bff;
+  --sky: #5ab0ff;
+  --amber: #f2a900;      /* "Due soon" */
+  --red: #d92d20;        /* "Past due", errors and Delete (nothing else) */
+  --green: #16a34a;      /* online */
+}
+
+/* --- Paper and the moving grid --------------------------------------------------
+   The paper is painted on <html>, and <body> is see-through, so the grid
+   (body::before) can sit between the paper and the content. */
+html {
+  background-color: var(--paper);
+}
+body {
+  background-color: transparent;
+}
+
+/* The background: a sheet of graph paper, its squares lined up with the
+   screen, tilted back by 15 degrees so the bottom edge is nearest to you and
+   the top recedes. It drifts slowly and steadily upwards.
+
+   Performance: the grid is drawn once and only *moved* with an animated
+   transform, which the graphics card does without redrawing anything. As it
+   moves straight up by exactly one square (48px) per loop, every loop looks
+   the same, so it repeats seamlessly. The sheet is larger than the screen on
+   every side so its edges never come into view.
+   On every page load, static/ui.js speeds this same drift up into a short
+   "rush", starting from where the previous page left the grid. */
+body::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  top: -60vh;
+  left: -50vw;
+  width: 200vw;
+  height: 220vh;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgb(11 31 58 / 0.16) 1.5px, transparent 1.5px),
+    linear-gradient(to bottom, rgb(11 31 58 / 0.16) 1.5px, transparent 1.5px);
+  background-size: 48px 48px;
+  transform-origin: 50% 100%;
+  transform: perspective(1200px) rotateX(15deg) translateY(0);
+  will-change: transform;
+  animation: grid-drift 6s linear infinite;
+}
+/* The fade: the grid melts into the paper towards the top (the far side), so
+   it reads as depth. A fixed layer painted once, never moving. */
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to top, transparent 10%, var(--paper) 78%);
+}
+@keyframes grid-drift {
+  from { transform: perspective(1200px) rotateX(15deg) translateY(0); }
+  to { transform: perspective(1200px) rotateX(15deg) translateY(-48px); }
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* --- Type ------------------------------------------------------------------- */
+
+/* Section headings read like code comments: "// ASSIGNMENTS". */
+h2.card-title,
+.section-title,
+.modal-box h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+}
+h2.card-title::before,
+.section-title::before {
+  content: "// ";
+  opacity: 0.45;
+}
+
+/* A blinking cursor after each page's main heading. */
+main h1.page-title::after {
+  content: "_";
+  margin-left: 0.08em;
+  animation: cursor-blink 1.05s steps(1) infinite;
+}
+
+code {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.05em 0.35em;
+}
+pre code,
+code.block {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.badge {
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  border-color: var(--ink);
+}
+
+/* Links: navy text with a sky highlighter underline. */
+.link {
+  text-decoration: none;
+  background: linear-gradient(transparent 62%, rgb(90 176 255 / 0.55) 62%);
+}
+.link:hover {
+  background: var(--sky);
+}
+
+/* --- Cards, pop-ups and panels: thin navy lines, hard square shadows ---------- */
+
+/* Cards, the folder sidebar and the Filter panel: deeper blue paper, 60%
+   see-through, so the moving grid shows faintly behind. No blur: blurring
+   what's behind every card, over a moving grid, keeps the graphics card busy. */
+.card:not(.border-dashed),
+.panel {
+  background-color: rgb(215 229 248 / 0.6);
+}
+/* Pop-up windows are solid, over a paper-coloured veil. */
+.modal-box {
+  background-color: var(--card);
+}
+.modal.modal-open {
+  background-color: rgb(234 241 251 / 0.82);
+}
+.drawer-side aside {
+  background-color: rgb(215 229 248 / 0.6);
+}
+
+.card,
+.panel,
+.modal-box,
+.toast .alert {
+  border: 1.5px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+.drawer-side aside {
+  border-right: 1.5px solid var(--ink);
+}
+/* The "Add Agent" card keeps a dashed outline. */
+.card.border-dashed {
+  border: 1.5px dashed var(--ink);
+  box-shadow: none;
+  background: rgb(255 255 255 / 0.3);
+}
+
+/* Things you can click lift towards you. */
+.card,
+.lift {
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.card.cursor-pointer:hover,
+.lift:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 7px 7px 0 var(--ink);
+}
+.card.cursor-pointer:active,
+.lift:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+.card.border-dashed:hover {
+  background: var(--sky);
+}
+
+/* --- Buttons and fields ----------------------------------------------------------- */
+
+.btn {
+  border-color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: transform 0.09s ease, box-shadow 0.09s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.btn:not(.btn-ghost):not(.btn-link):not(.join-item):not(.btn-circle):not(:disabled) {
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.btn:not(:disabled):active {
+  transform: translate(2px, 2px) scale(0.98);
+  box-shadow: 0 0 0 var(--ink) !important;
+}
+/* Main (navy) buttons turn cobalt on hover. */
+.btn-primary:not(:disabled):hover {
+  background: var(--cobalt);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+.btn-ghost:not(:disabled):hover {
+  background: rgb(90 176 255 / 0.35);
+}
+/* Start is cobalt, Pause is white. */
+.btn-start {
+  background: var(--cobalt);
+  color: #ffffff;
+}
+.btn-start:not(:disabled):hover {
+  background: var(--sky);
+  color: var(--ink);
+}
+.btn-pause {
+  background: #ffffff;
+  color: var(--ink);
+}
+.btn-pause:not(:disabled):hover {
+  background: var(--paper);
+}
+
+.input,
+.textarea,
+.select,
+.file-input {
+  border: 1.5px solid var(--ink);
+  background: #ffffff;
+}
+.input:focus,
+.input:focus-within,
+.textarea:focus,
+.select:focus {
+  outline: 3px solid var(--sky);
+  outline-offset: 1px;
+  border-color: var(--ink);
+}
+
+.menu li > a:hover {
+  background: rgb(90 176 255 / 0.3);
+}
+.menu li > a.menu-active,
+.menu li > a.menu-active:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Due indicators. */
+.due-soon {
+  background: var(--amber);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.due-past {
+  background: var(--red);
+  color: #ffffff;
+  border-color: var(--ink);
+}
+
+/* --- The classes timeline ------------------------------------------------------- */
+
+.tl-frame {
+  position: relative;
+  overflow: auto;
+  max-height: 72vh;
+  border: 1.5px solid var(--ink);
+  background: rgb(215 229 248 / 0.35);
+}
+.tl-canvas {
+  position: relative;
+}
+.tl-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  background: rgb(234 241 251 / 0.85);
+}
+.tl-month {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgb(11 31 58 / 0.35);
+  padding: 0.35rem 0.4rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* A tick on every Friday (seminar day), along the bottom of the axis, with
+   the day of the month just above it when there's room. */
+.tl-friday {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 9px;
+  border-left: 1.5px solid var(--ink);
+  pointer-events: auto;
+}
+.tl-friday span {
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+  transform: translateX(-50%);
+  font-size: 0.62rem;
+  line-height: 1;
+  opacity: 0.7;
+}
+.tl-month-line {
+  position: absolute;
+  top: 0;
+  width: 0;
+  border-left: 1px dashed rgb(11 31 58 / 0.12);
+  pointer-events: none;
+}
+.tl-today {
+  position: absolute;
+  top: 0;
+  width: 0;
+  border-left: 2px solid var(--cobalt);
+  pointer-events: none;
+  z-index: 2;
+}
+.tl-today span {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  background: var(--cobalt);
+  color: #ffffff;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  white-space: nowrap;
+}
+.tl-connector {
+  position: absolute;
+  border-left: 1.5px dashed var(--ink);
+  border-right: 1.5px dashed var(--ink);
+  pointer-events: none;
+  opacity: 0.55;
+}
+.tl-box {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow: hidden;
+  padding: 0.5rem 0.65rem;
+  background: rgb(215 229 248 / 0.92);
+  border: 1.5px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  z-index: 3;
+}
+.tl-span {
+  position: absolute;
+  left: 0;
+  height: 5px;
+  background: var(--cobalt);
+}
+/* The notification mark: a small cobalt circle with "!" in the box's top-right
+   corner, while a class has submissions the viewer hasn't seen. */
+.tl-new {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  background: var(--cobalt);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.tl-box.ended {
+  background: rgb(234 241 251 / 0.92);
+}
+.tl-box.ended .tl-span {
+  background: var(--sky);
+}
+
+/* --- The student window --------------------------------------------------------- */
+
+.sw-frame {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1.5px solid var(--ink);
+  background: rgb(215 229 248 / 0.25);
+}
+.sw-canvas {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 2rem;
+  padding: 1.25rem;
+  width: max-content;
+  min-width: 100%;
+}
+/* A gen's group: a lightly tinted, see-through frame with a dashed navy border. */
+.gen-frame {
+  position: relative;
+  padding: 1.75rem 1rem 1rem;
+  border: 1.5px dashed var(--ink);
+  background: rgb(47 91 255 / 0.08);
+}
+.gen-frame > .gen-label {
+  position: absolute;
+  top: -0.75rem;
+  left: 0.75rem;
+  padding: 0 0.4rem;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.gen-cells {
+  display: grid;
+  gap: 0.85rem;
+}
+/* Cells keep a fixed, readable size: more students make the window bigger,
+   never the cells smaller. */
+.student-cell {
+  width: 15rem;
+  height: 7.5rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  background: rgb(215 229 248 / 0.85);
+  border: 1.5px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+/* Draggable areas: a grab hand with a mouse. Touch screens scroll natively. */
+[data-pan] {
+  cursor: grab;
+}
+[data-pan].panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* The bar above the student window: the "+" shows while hovering (and
+   always on touch screens, which can't hover). */
+.bar .bar-plus {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.bar:hover .bar-plus,
+.bar:focus-within .bar-plus {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bar .bar-plus {
+    opacity: 1;
+  }
+}
+
+/* --- The login page title, typing itself out ----------------------------------------
+   Each letter is its own <span> (see login.html), appearing one after
+   another, so the title can wrap onto several lines on phones. */
+.typed .ch {
+  opacity: 0;
+  animation: type-char 0.01s linear forwards;
+  animation-delay: calc(var(--i) * 45ms);
+}
+.typed .word {
+  white-space: nowrap;
+}
+.typed::after {
+  content: "_";
+  animation: cursor-blink 1.05s steps(1) infinite;
+}
+
+/* --- Animations ---------------------------------------------------------------------
+   All switched off for visitors who ask their device to reduce motion. */
+
+/* Moving between pages: the old page lifts away, the new one wipes in. */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root) {
+  animation: page-out 0.2s ease-in both;
+}
+::view-transition-new(root) {
+  animation: page-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Sections rise in one after another when a page loads. "backwards" applies
+   the starting state only *before* the animation, so nothing is left on the
+   element afterwards: a leftover transform would trap pop-up windows inside. */
+main > * {
+  animation: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+main > *:nth-child(2) { animation-delay: 0.06s; }
+main > *:nth-child(3) { animation-delay: 0.12s; }
+main > *:nth-child(4) { animation-delay: 0.18s; }
+main > *:nth-child(5) { animation-delay: 0.24s; }
+
+/* Pop-up windows snap open. */
+.modal.modal-open .modal-box {
+  animation: pop-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.25) backwards;
+}
+
+/* Toasts slide in, then fade out before they're removed (after 3 s). */
+.toast .alert {
+  animation:
+    toast-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.25) both,
+    toast-out 0.3s ease-in 2.7s forwards;
+}
+.toast .alert-success {
+  background: var(--cobalt);
+  color: #ffffff;
+}
+.toast .alert-warning {
+  background: #ffffff;
+  color: var(--ink);
+}
+
+/* The pulsing "online" light. */
+.live-dot::before {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: 0.35em;
+  border-radius: 50%;
+  background: var(--green);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cursor-blink {
+  50% { opacity: 0; }
+}
+@keyframes type-char {
+  to { opacity: 1; }
+}
+@keyframes page-out {
+  to { opacity: 0; transform: translateY(-10px); }
+}
+@keyframes page-in {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translate(6px, 10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(110%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(30%); }
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+/* --- Reduced motion ---------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+  body::before {
+    animation: none !important;  /* the grid stays tilted, but still */
+  }
+  .typed .ch {
+    opacity: 1;
+  }
+}

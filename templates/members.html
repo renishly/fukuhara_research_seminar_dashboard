@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+{# One row per account. Each action is a small plain form; risky ones ask first (Alpine). #}
+{% macro member_row(user) %}
+<li class="space-y-2 py-3" x-data="{ editing: false, deleting: false }">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <strong class="break-words">{{ user.full_name }}</strong>
+    <code class="text-xs">{{ user.login_id }}</code>
+    {% if user.role == "student" %}<span class="text-xs text-base-content/70" title="What guests see instead of the name">guests see: {{ placeholders[user.id] }}</span>{% endif %}
+    {% if user.id == viewer.id %}<span class="badge badge-secondary badge-xs">You</span>{% endif %}
+    <span class="ml-auto flex flex-wrap gap-1">
+      <button type="button" class="btn btn-ghost btn-xs" @click="editing = !editing">Edit</button>
+      <form method="post" action="/members/{{ user.id }}/reset-password" class="inline"
+            onsubmit="return confirm('Reset the password of this account? It gets a new temporary password and is signed out everywhere.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn btn-ghost btn-xs">Reset password</button>
+      </form>
+      {% if user.id != viewer.id %}
+      <button type="button" class="btn btn-ghost btn-xs text-error" @click="deleting = !deleting">Delete</button>
+      {% endif %}
+    </span>
+  </div>
+  <div x-show="editing" x-cloak class="grid gap-3 border border-base-content/30 bg-white/40 p-3 md:grid-cols-3">
+    <form method="post" action="/members/{{ user.id }}/name" class="space-y-1">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="text-xs font-semibold">Full name</label>
+      <input type="text" name="full_name" value="{{ user.full_name }}" required maxlength="100" class="input input-sm w-full">
+      <button type="submit" class="btn btn-sm">Save name</button>
+    </form>
+    {% if user.role == "student" %}
+    <form method="post" action="/members/{{ user.id }}/gen" class="space-y-1">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="text-xs font-semibold">Gen</label>
+      <select name="gen_id" class="select select-sm w-full">
+        {% for gen in gens %}<option value="{{ gen.id }}" {{ 'selected' if gen.id == user.gen_id }}>Gen {{ gen.number }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm">Save gen</button>
+    </form>
+    <form method="post" action="/members/{{ user.id }}/other-names" class="space-y-1">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="text-xs font-semibold">Other names (hidden from guests too)</label>
+      <textarea name="other_names" rows="2" class="textarea textarea-sm w-full">{{ user.other_names or '' }}</textarea>
+      <button type="submit" class="btn btn-sm">Save other names</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if user.id != viewer.id %}
+  <form x-show="deleting" x-cloak method="post" action="/members/{{ user.id }}/delete" class="space-y-2 border border-error p-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <p class="text-sm">Delete the account of <strong>{{ user.full_name }}</strong>, with their submissions, agents and all their data?
+      <strong>This can't be undone.</strong></p>
+    <div class="flex flex-wrap items-center gap-2">
+      <input type="password" name="password" required autocomplete="current-password" placeholder="Your password"
+             class="input input-sm" aria-label="Your password">
+      <button type="submit" class="btn btn-error btn-sm">Delete account</button>
+      <button type="button" class="btn btn-ghost btn-sm" @click="deleting = false">Cancel</button>
+    </div>
+  </form>
+  {% endif %}
+</li>
+{% endmacro %}
+
+<main class="mx-auto max-w-5xl space-y-8 px-4 py-8">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="page-title text-3xl font-bold tracking-tight">Members</h1>
+      <p class="text-sm text-base-content/70">Admins only. Login IDs are shown here and nowhere else.</p>
+    </div>
+    <form method="post" action="/gens">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn btn-primary btn-sm">+ Add Gen {{ (gens[0].number + 1) if gens else 1 }}</button>
+    </form>
+  </header>
+
+  {% if error %}<div role="alert" class="alert alert-error alert-soft">{{ error }}</div>{% endif %}
+  {% if notice %}<div role="status" class="alert alert-soft">{{ notice }}</div>{% endif %}
+  {% if temporary %}
+  <div role="status" class="alert alert-soft flex-col items-start">
+    <p>New temporary password for <strong>{{ reset_for.full_name }}</strong> (shown only this once). They've been signed out everywhere:</p>
+    <code class="select-all text-base">{{ temporary }}</code>
+    <p class="text-xs">Give it to them privately, and ask them to change it on their Account page.</p>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 md:grid-cols-2">
+    <section class="card">
+      <div class="card-body gap-2">
+        <h2 class="card-title">File storage</h2>
+        <progress class="progress w-full" value="{{ storage_percent }}" max="100"></progress>
+        <p class="text-sm">{{ storage_used | human_size }} of {{ storage_limit | human_size }} used ({{ storage_percent }}%).
+          New uploads are refused above that, to stay inside Supabase's free 1 GB.</p>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-body gap-2">
+        <h2 class="card-title">Database</h2>
+        {% if database_used is not none %}
+        <progress class="progress w-full" value="{{ database_percent }}" max="100"></progress>
+        <p class="text-sm">{{ database_used | human_size }} of {{ database_limit | human_size }} used ({{ database_percent }}%).
+          At 500 MB Supabase's free database turns read-only: nothing can be saved (not even sign-ins) until space is freed.</p>
+        {% else %}
+        <p class="text-sm">The database's size can't be read right now.</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-body gap-1">
+      <h2 class="card-title">Admins ({{ admins | length }})</h2>
+      <ul class="divide-y divide-base-content/20">{% for user in admins %}{{ member_row(user) }}{% endfor %}</ul>
+    </div>
+  </section>
+
+  {% for group in groups %}
+  <section class="card">
+    <div class="card-body gap-1">
+      <h2 class="card-title">Gen {{ group.gen.number }} ({{ group.students | length }})</h2>
+      {% if group.students %}
+      <ul class="divide-y divide-base-content/20">{% for user in group.students %}{{ member_row(user) }}{% endfor %}</ul>
+      {% else %}<p class="text-sm text-base-content/70">No students yet.</p>{% endif %}
+    </div>
+  </section>
+  {% endfor %}
+</main>
+{% endblock %}

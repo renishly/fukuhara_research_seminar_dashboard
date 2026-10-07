@@ -1,0 +1,42 @@
+{# The three tab buttons and the active tab's content. Switching tabs fetches
+   this again for the new tab (HTMX), and puts ?tab= in the address, so the
+   tab can be linked and survives a refresh. #}
+<section id="tab-area" class="space-y-6">
+  <div class="flex justify-center">
+    <div class="join" role="tablist">
+      {% for name in ("assignments", "exams", "agents") %}
+      <a role="tab" href="/classes/{{ course.id }}?tab={{ name }}" aria-selected="{{ 'true' if name == tab else 'false' }}"
+         class="join-item btn {{ 'btn-primary' if name == tab else '' }}"
+         hx-get="/classes/{{ course.id }}/tab/{{ name }}" hx-target="#tab-area" hx-swap="outerHTML"
+         hx-push-url="/classes/{{ course.id }}?tab={{ name }}">{{ name | capitalize }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if tab != "agents" %}
+  {# The bar: the latest assignment/exam. It checks for changes every 15 s.
+     hx-disinherit keeps buttons inside from inheriting these polling settings. #}
+  <div class="bar card" hx-get="/classes/{{ course.id }}/bar/{{ tab }}"
+       hx-trigger="every {{ poll_seconds }}s [document.visibilityState === 'visible']"
+       hx-include="#bar-seen-{{ tab }}" hx-swap="innerHTML" hx-disinherit="*">
+    {% include "partials/bar.html" %}
+    <input type="hidden" id="bar-seen-{{ tab }}" name="seen" value="">
+  </div>
+  {% endif %}
+
+  <div class="space-y-2">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="section-title font-semibold">{{ "Agents" if tab == "agents" else "Students" }}</h2>
+      <button type="button" class="btn btn-ghost btn-xs" data-scroll-to="start" data-target="sw-frame">Re-centre</button>
+    </div>
+    {# The student window: as big as it needs to be; drag or scroll to move around. #}
+    <div id="sw-frame" class="sw-frame" data-pan>
+      <div hx-get="/classes/{{ course.id }}/window/{{ tab }}"
+           hx-trigger="every {{ poll_seconds }}s [document.visibilityState === 'visible']"
+           hx-include="#window-seen-{{ tab }}" hx-swap="innerHTML" hx-disinherit="*">
+        {% include "partials/student_window.html" %}
+        <input type="hidden" id="window-seen-{{ tab }}" name="seen" value="">
+      </div>
+    </div>
+  </div>
+</section>

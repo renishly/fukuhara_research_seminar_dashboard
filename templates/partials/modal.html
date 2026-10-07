@@ -1,0 +1,8 @@
+{# The frame of every pop-up window. Fragments extend this and fill "body".
+   Closing (button, Escape, or a click outside) simply removes the pop-up. #}
+<div class="modal modal-open" x-data @keydown.escape.window="$el.remove()" role="dialog" aria-modal="true">
+  <div class="modal-box {% block size %}max-w-xl{% endblock %}">
+    {% block body %}{% endblock %}
+  </div>
+  <div class="modal-backdrop" @click="$el.parentElement.remove()"></div>
+</div>

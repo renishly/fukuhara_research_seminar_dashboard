@@ -1,0 +1,71 @@
+/* The source for static/tailwind.css: Tailwind CSS utilities plus daisyUI's
+   components, in the "bluepaper" colours.
+
+   Tailwind reads the templates (and the Python files that write a little
+   HTML) for the class names they use, such as "grid-cols-3" or "btn", and
+   writes CSS for just those. Rebuild it after using a class name that isn't
+   used anywhere yet (needs Node.js, on your computer only; see the README):
+
+     npm install
+     npm run build:css
+
+   static/tailwind.css is committed, so Render never needs Node.js.
+   The rest of the look (borders, shadows, the moving grid, animations) is
+   plain CSS in static/theme.css. */
+@import "tailwindcss" source(none);
+@source "./templates";
+@source "./routes";
+@source "./web.py";
+
+/* daisyUI without its built-in themes: only ours, below. */
+@plugin "daisyui" {
+  themes: false;
+}
+
+/* "bluepaper": navy ink on pale blueprint paper, cobalt and sky accents. */
+@plugin "daisyui/theme" {
+  name: "bluepaper";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: #d7e5f8;        /* cards and pop-ups: a deeper blue paper */
+  --color-base-200: #eaf1fb;        /* the page: pale blueprint paper */
+  --color-base-300: #b9cdea;        /* dividers and quiet fills */
+  --color-base-content: #0b1f3a;    /* navy ink: text, borders, lines */
+
+  --color-primary: #0b1f3a;         /* main buttons: navy, paper-coloured text */
+  --color-primary-content: #eaf1fb;
+  --color-secondary: #2f5bff;       /* cobalt */
+  --color-secondary-content: #ffffff;
+  --color-accent: #5ab0ff;          /* sky */
+  --color-accent-content: #0b1f3a;
+  --color-neutral: #0b1f3a;
+  --color-neutral-content: #eaf1fb;
+
+  --color-info: #2f5bff;
+  --color-info-content: #ffffff;
+  --color-success: #16a34a;         /* online */
+  --color-success-content: #ffffff;
+  --color-warning: #f2a900;         /* "Due soon" */
+  --color-warning-content: #0b1f3a;
+  --color-error: #d92d20;           /* "Past due", errors and Delete only */
+  --color-error-content: #ffffff;
+
+  /* Square corners, crisp lines, no soft depth: the drafting-paper look. */
+  --radius-selector: 0rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@theme {
+  /* IBM Plex Mono for Latin text; IBM Plex Sans JP so Japanese names display
+     properly; then the system's own fonts while those load. */
+  --font-sans: "IBM Plex Mono", "IBM Plex Sans JP", ui-monospace, SFMono-Regular, Menlo, "Hiragino Sans", "Yu Gothic", monospace;
+  --font-mono: "IBM Plex Mono", "IBM Plex Sans JP", ui-monospace, SFMono-Regular, Menlo, monospace;
+}

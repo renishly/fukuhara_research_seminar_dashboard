@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ status }}{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-xl px-4 py-16">
+  <section class="card">
+    <div class="card-body gap-4">
+      <h1 class="page-title text-2xl font-bold">{{ "Not found" if status == 404 else ("Sorry, the site can't do that right now" if status >= 500 else "Can't do that") }}</h1>
+      <p>{{ message }}</p>
+      <div><a href="/classes" class="btn btn-primary">&larr; Classes</a></div>
+    </div>
+  </section>
+</main>
+{% endblock %}

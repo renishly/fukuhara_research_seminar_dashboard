@@ -1,0 +1,40 @@
+{# The inside of the student window: one framed group per gen (newest first),
+   one fixed-size cell per enrolled student. #}
+{% if groups %}
+<div class="sw-canvas">
+  {% for group in groups %}
+  <section class="gen-frame" aria-label="{{ gen_label(group.gen) }}">
+    <span class="gen-label">{{ gen_label(group.gen) or "No gen" }}</span>
+    <div class="gen-cells" style="grid-template-columns: repeat({{ group.columns }}, 15rem)">
+      {% for cell in group.cells %}
+      {% set student = cell.student %}
+      {% set url = "/classes/%d/agents/%d" % (course.id, student.id) if tab == "agents"
+                   else "/classes/%d/%s/students/%d" % (course.id, tab, student.id) %}
+      <a href="{{ url }}" class="student-cell lift">
+        <span class="flex items-center gap-2">
+          <strong class="min-w-0 flex-1 truncate">{{ who(student) }}</strong>
+          {% if viewer.id == student.id %}<span class="badge badge-secondary badge-xs">You</span>{% endif %}
+          {% if tab == "agents" and cell.online %}<span class="live-dot badge badge-outline badge-xs">online</span>{% endif %}
+        </span>
+        {% if tab == "agents" %}
+          {% if cell.last_connected %}
+          <span class="text-sm">Last connected</span>
+          <span class="font-mono text-xs">{{ cell.last_connected | jst }}</span>
+          {% else %}
+          <span class="text-sm text-base-content/60">Never connected</span>
+          {% endif %}
+        {% elif cell.latest %}
+          <span class="line-clamp-2 text-sm break-words">{{ mask(cell.latest.title) if cell.latest.title else "Untitled submission" }}</span>
+          <span class="mt-auto font-mono text-xs text-base-content/70">{{ (cell.latest.edited_at or cell.latest.created_at) | jst }}</span>
+        {% else %}
+          <span class="text-sm text-base-content/60">No submissions yet</span>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<p class="p-6 text-center text-base-content/70">Nobody is enrolled in this class yet.</p>
+{% endif %}

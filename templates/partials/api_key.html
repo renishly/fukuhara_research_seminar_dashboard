@@ -1,0 +1,4 @@
+{# Shown under View key / Replace key once the password is right. #}
+{% if replaced %}<div role="alert" class="alert alert-soft text-sm">Key replaced. The old key no longer works. Restart the agent with this one:</div>{% endif %}
+<code class="block select-all break-all bg-white/70 p-3 font-mono text-sm">{{ api_key }}</code>
+<div class="pt-2">{% include "partials/connection_values.html" %}</div>

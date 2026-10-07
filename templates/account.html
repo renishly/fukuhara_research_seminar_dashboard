@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-2xl space-y-8 px-4 py-10">
+  <header>
+    <h1 class="page-title text-3xl font-bold tracking-tight break-words">{{ viewer.user.full_name }}</h1>
+    <p class="text-sm text-base-content/70">
+      Login ID <code>{{ viewer.user.login_id }}</code> &middot;
+      {{ "Admin" if viewer.is_admin else (gen_label(gen) ~ " student") }}
+    </p>
+  </header>
+
+  <section class="card">
+    <form method="post" action="/account/password" class="card-body gap-3">
+      <h2 class="card-title">Change password</h2>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if password_error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ password_error }}</div>{% endif %}
+      {% if password_notice %}<div role="status" class="alert alert-soft text-sm">{{ password_notice }}</div>{% endif %}
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Current password</legend>
+        <input type="password" name="current_password" required autocomplete="current-password" class="input w-full">
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">New password (at least 8 characters)</legend>
+        <input type="password" name="new_password" required minlength="8" autocomplete="new-password" class="input w-full">
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">New password again</legend>
+        <input type="password" name="new_password_again" required minlength="8" autocomplete="new-password" class="input w-full">
+      </fieldset>
+      <div><button type="submit" class="btn btn-primary">Change password</button></div>
+      <p class="text-xs text-base-content/60">Changing your password signs out every other device.</p>
+    </form>
+  </section>
+
+  {% if viewer.is_student %}
+  <section class="card">
+    <form method="post" action="/account/other-names" class="card-body gap-3">
+      <h2 class="card-title">Other names</h2>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      {% if names_error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ names_error }}</div>{% endif %}
+      {% if names_notice %}<div role="status" class="alert alert-soft text-sm">{{ names_notice }}</div>{% endif %}
+      <p class="text-sm">
+        Guests never see your name: they see a placeholder instead, and your name is replaced wherever it appears
+        in text. List other ways your name is written (a romaji spelling, a nickname...), one per line, up to 10,
+        so those are hidden too. Only you and admins can see this list.
+      </p>
+      <textarea name="other_names" rows="4" class="textarea w-full" aria-label="Other names, one per line"
+                placeholder="e.g. Yamada Taro&#10;Taro-kun">{{ viewer.user.other_names or '' }}</textarea>
+      <div><button type="submit" class="btn btn-primary">Save other names</button></div>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-body gap-3">
+      <h2 class="card-title">Devices</h2>
+      <p class="text-sm">Each device signs in on its own and stays signed in for 7 days. Signed in somewhere you shouldn't be?</p>
+      <form method="post" action="/account/signout-all">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn">Sign out all devices</button>
+      </form>
+    </div>
+  </section>
+</main>
+{% endblock %}

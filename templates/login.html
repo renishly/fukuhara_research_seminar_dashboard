@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+{# The title types itself out, letter by letter. Each word is kept on one
+   line (but words wrap onto new lines on phones). #}
+{% set title = "Fukuhara Research Seminar Dashboard" %}
+<main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-8 px-4 py-10">
+  <h1 class="typed text-center text-3xl font-bold leading-tight tracking-tight sm:text-4xl" aria-label="{{ title }}">
+    {%- set counter = namespace(i=0) -%}
+    {%- for word in title.split(" ") -%}
+      <span class="word" aria-hidden="true">
+        {%- for letter in word -%}<span class="ch" style="--i: {{ counter.i }}">{{ letter }}</span>{%- set counter.i = counter.i + 1 -%}{%- endfor -%}
+      </span>{{ " " if not loop.last }}{%- set counter.i = counter.i + 1 -%}
+    {%- endfor -%}
+  </h1>
+
+  <section class="card">
+    <form method="post" action="/login" class="card-body gap-3">
+      <h2 class="card-title">Sign in</h2>
+      {% if signed_out %}
+      <div role="status" class="alert alert-soft text-sm">You're signed out on this device.</div>
+      {% endif %}
+      {% if error %}
+      <div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>
+      {% endif %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Login ID</legend>
+        <input type="text" name="login_id" value="{{ login_id or '' }}" required autocomplete="username"
+               autocapitalize="none" spellcheck="false" class="input w-full" autofocus>
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Password</legend>
+        <input type="password" name="password" required autocomplete="current-password" class="input w-full">
+      </fieldset>
+      <button type="submit" class="btn btn-primary w-full">Sign in</button>
+      <p class="text-xs text-base-content/60">You stay signed in on this device for 7 days, or until you log out.</p>
+      <p class="text-sm">No account yet? <a href="/register" class="link">Register</a></p>
+    </form>
+  </section>
+
+  <form method="post" action="/guest" class="text-center">
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn btn-ghost">Continue as guest &rarr;</button>
+    <p class="mt-1 text-xs text-base-content/60">Look around, read-only, with limited detail. No details needed.</p>
+  </form>
+</main>
+{% endblock %}

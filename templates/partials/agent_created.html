@@ -1,0 +1,11 @@
+{# Shown in the Add Agent window after an agent is added. #}
+<div id="add-agent-form" class="space-y-4">
+  <h3 class="text-lg font-bold">Agent added</h3>
+  <p><strong>{{ agent.name }}</strong> is ready. Start it with its API key and its card turns &ldquo;online&rdquo;.</p>
+  {% if api_key %}
+  <p class="text-sm">Its new API key is below. You can see it again later with <strong>View key</strong> in the agent's settings (that needs your password).</p>
+  <code class="block select-all break-all bg-white/70 p-3 font-mono text-sm">{{ api_key }}</code>
+  {% endif %}
+  {% include "partials/connection_values.html" %}
+  <div class="modal-action"><a href="{{ done_url }}" class="btn btn-primary">Done</a></div>
+</div>

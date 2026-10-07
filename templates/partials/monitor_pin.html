@@ -1,0 +1,7 @@
+{# The Monitor's pin (owner only): shows the monitor on the agent's grid card.
+   One pin per agent, so pinning a category sends this back unpinned (out of band). #}
+<button type="button" id="monitor-pin" {% if oob %}hx-swap-oob="true"{% endif %}
+        class="btn btn-sm {{ 'btn-active' if agent.pinned_monitor else 'opacity-50' }}"
+        hx-post="/agents/{{ agent.id }}/monitor/pin" hx-target="this" hx-swap="outerHTML"
+        aria-pressed="{{ 'true' if agent.pinned_monitor else 'false' }}" aria-label="Pin the monitor to the agent's card"
+        title="{{ 'Pinned to' if agent.pinned_monitor else 'Pin to' }} this agent's card on the grid">&#128204;</button>

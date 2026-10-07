@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Classes{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-[1600px] space-y-4 px-4 py-8">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="page-title text-3xl font-bold tracking-tight">Classes</h1>
+      <p class="text-sm text-base-content/70">Drag, scroll or use the scroll bar to move through time. Click a class to open it.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      {% include "partials/zoom_controls.html" %}
+      <button type="button" class="btn btn-sm" data-scroll-to="today" data-target="timeline-frame">Today</button>
+      {% if viewer.is_admin %}
+      <button type="button" class="btn btn-primary btn-sm" hx-get="/classes/new" hx-target="#modal">+ Create class</button>
+      {% endif %}
+    </div>
+  </header>
+
+  {# The timeline. Everything inside is positioned by timeline.py; ui.js
+     scrolls it so today (or the zoom's centre) is in the middle. #}
+  <div id="timeline-frame" class="tl-frame" data-pan aria-label="Classes timeline">
+    {% include "partials/timeline.html" %}
+  </div>
+  {% if not boxes %}
+  <p class="text-center text-base-content/70">
+    No classes yet.{% if viewer.is_admin %} Use <strong>+ Create class</strong> to add the first one.{% endif %}
+  </p>
+  {% endif %}
+</main>
+{% endblock %}

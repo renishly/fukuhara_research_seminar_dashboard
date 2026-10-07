@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% import "partials/content.html" as content %}
+{% block title %}{{ kinds | capitalize }} · {{ mask(course_name(course)) }}{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-4xl space-y-8 px-4 py-8">
+  <header class="space-y-2">
+    <a href="/classes/{{ course.id }}?tab={{ kinds }}" class="btn btn-ghost btn-sm -ml-3">&larr; {{ mask(course_name(course)) }}</a>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h1 class="page-title text-3xl font-bold tracking-tight">{{ kinds | capitalize }}</h1>
+      {% if can_manage %}
+      <button type="button" class="btn btn-primary btn-sm" hx-get="/classes/{{ course.id }}/{{ kinds }}/new" hx-target="#modal">+ Add {{ kind }}</button>
+      {% endif %}
+    </div>
+    <p class="text-sm text-base-content/70">Newest first, each with the submissions linked to it.</p>
+  </header>
+
+  {% for entry in entries %}
+  {% set task = entry.task %}
+  {% set status = due_status(task.due_at) %}
+  <article class="card">
+    <div class="card-body gap-3">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <h2 class="min-w-0 break-words text-xl font-bold">{{ mask(task.title) }}</h2>
+        <div class="flex items-center gap-2">
+          {% if status == "soon" %}<span class="badge due-soon">Due soon</span>{% elif status == "past" %}<span class="badge due-past">Past due</span>{% endif %}
+          {% if can_manage %}
+          <button type="button" class="btn btn-ghost btn-xs" hx-get="/tasks/{{ task.id }}/edit" hx-target="#modal">Edit</button>
+          <button type="button" class="btn btn-ghost btn-xs text-error" hx-post="/tasks/{{ task.id }}/delete"
+                  hx-confirm="Delete this {{ kind }}? Its submissions are kept (just unlinked).">Delete</button>
+          {% endif %}
+        </div>
+      </div>
+      <p class="text-sm">Due <strong>{{ task.due_at | jst }}</strong> &middot; {{ task.due_at | relative }}
+        {% if viewer.is_member and not task.guest_visible %}<span class="badge badge-outline badge-xs ml-1">not visible to guests</span>{% endif %}</p>
+      {% if task.description %}<p class="whitespace-pre-line break-words">{{ mask(task.description) }}</p>{% endif %}
+      {{ content.show(task, files, mask) }}
+
+      <section class="space-y-2 border-t border-base-content/30 pt-3">
+        <h3 class="section-title text-sm font-semibold">Submissions ({{ entry.submissions | length }})</h3>
+        {% for s in entry.submissions %}
+        {% set student = students.get(s.student_id) %}
+        <div class="space-y-1 border border-base-content/30 bg-white/40 p-3">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <a href="/classes/{{ course.id }}/{{ kinds }}/students/{{ s.student_id }}" class="link font-semibold">{{ who(student) }}</a>
+            {% if not viewer.is_guest %}<span class="text-xs text-base-content/60">{{ labels.get(s.student_id, "") }}</span>{% endif %}
+            <span class="min-w-0 break-words">{{ mask(s.title) if s.title else "Untitled submission" }}</span>
+            {% if is_late(s, task) %}<span class="badge due-past badge-sm">Late</span>{% endif %}
+            <span class="ml-auto font-mono text-xs">{{ s.created_at | jst }}{% if s.edited_at %} &middot; edited {{ s.edited_at | jst }}{% endif %}</span>
+            {% if viewer.is_admin %}
+            <button type="button" class="btn btn-ghost btn-xs text-error" hx-post="/submissions/{{ s.id }}/delete"
+                    hx-confirm="Delete this submission and its file? (Moderation: this can't be undone.)">Delete</button>
+            {% endif %}
+          </div>
+          {{ content.show(s, files, mask) }}
+        </div>
+        {% else %}
+        <p class="text-sm text-base-content/60">No submissions linked yet.</p>
+        {% endfor %}
+      </section>
+    </div>
+  </article>
+  {% else %}
+  <p class="text-center text-base-content/70">No {{ kinds }} yet.</p>
+  {% endfor %}
+</main>
+{% endblock %}

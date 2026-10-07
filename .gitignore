@@ -1,0 +1,27 @@
+# Python virtual environment (recreate with: python3 -m venv .venv)
+.venv/
+
+# Real secrets - never commit this file
+.env
+
+# Local SQLite database and locally stored files
+local.db
+local_files/
+
+# The connector's offline buffer (items waiting to be sent)
+dashboard_buffer/
+
+# Files the demo agent took from its Inbox
+agent/received/
+
+# Node.js tools, only needed to rebuild static/tailwind.css
+node_modules/
+package-lock.json
+
+# Python / pytest caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store

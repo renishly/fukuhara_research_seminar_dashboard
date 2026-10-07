@@ -1,0 +1,20 @@
+{# Files waiting in this agent's Inbox (checked every 5 s while the window is open). #}
+{% if inbox_error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ inbox_error }}</div>
+{% elif inbox_notice %}<div role="status" class="alert alert-soft text-sm">{{ inbox_notice }}</div>{% endif %}
+{% if inbox %}
+<ul class="divide-y divide-base-content/20">
+  {% for entry in inbox %}
+  <li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+    <div class="min-w-0 flex-1">
+      <a href="/inbox/{{ entry.item.id }}/file" class="link break-all">{{ entry.file.filename if entry.file else "file" }}</a>
+      <p class="font-mono text-xs">{{ (entry.file.size if entry.file else 0) | human_size }} &middot; {{ entry.item.created_at | jst }} &middot; waiting</p>
+      {% if entry.item.note %}<p class="whitespace-pre-line break-words text-sm">{{ entry.item.note }}</p>{% endif %}
+    </div>
+    <button type="button" class="btn btn-ghost btn-xs" hx-post="/inbox/{{ entry.item.id }}/delete" hx-target="#inbox-list"
+            hx-confirm="Take this file back out of the Inbox? The agent won't get it.">Remove</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="py-3 text-sm text-base-content/70">Nothing waiting. Files you upload wait here until {{ agent.name }} takes them.</p>
+{% endif %}

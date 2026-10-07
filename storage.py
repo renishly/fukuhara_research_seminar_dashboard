@@ -1,0 +1,161 @@
+"""File storage: where uploaded files really live.
+
+Files never go in the database (Supabase's free database is only 500 MB and
+turns read-only when full). Instead:
+  - On the deployed site, with SUPABASE_URL and SUPABASE_SERVICE_KEY set,
+    files go into a *private* Supabase Storage bucket (SUPABASE_BUCKET,
+    default "seminar-files"), through Supabase's Storage REST API.
+  - Otherwise (on your computer, and in the tests) they go into a local
+    folder: ./local_files/, or LOCAL_FILES_DIR if that is set.
+
+The rest of the site only uses three functions:
+    save(upload)  -> the storage path of the new file
+    open(path)    -> the file's bytes, a piece at a time (for streaming)
+    delete(path)
+Browsers never see storage paths or Supabase addresses: every download goes
+through the site's own /files/{id}, which checks permissions first.
+"""
+
+import os
+import shutil
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import BinaryIO, Iterator
+
+import requests
+
+APP_DIR = Path(__file__).resolve().parent
+CHUNK_BYTES = 1024 * 1024  # files are read and sent 1 MB at a time
+TIMEOUT_SECONDS = 120  # a 50 MB upload can take a while
+
+
+class StorageError(Exception):
+    """File storage couldn't be reached or refused the request."""
+
+
+def _supabase() -> tuple[str, str, str] | None:
+    """(url, service key, bucket) when Supabase Storage is configured, else None."""
+    url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+    key = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
+    if not url or not key:
+        return None
+    bucket = (os.getenv("SUPABASE_BUCKET") or "seminar-files").strip()
+    return url, key, bucket
+
+
+def _headers(key: str) -> dict:
+    # Supabase wants the key twice: "apikey" for its gateway, and as a bearer
+    # token for Storage itself. The service key can read every private file,
+    # so it must only ever be used here, on the server.
+    return {"apikey": key, "Authorization": f"Bearer {key}"}
+
+
+def local_dir() -> Path:
+    """The folder used when Supabase isn't configured (read each time, so tests can change it)."""
+    return Path(os.getenv("LOCAL_FILES_DIR") or APP_DIR / "local_files")
+
+
+def using_supabase() -> bool:
+    return _supabase() is not None
+
+
+def new_path() -> str:
+    """A fresh, unguessable storage path such as "2026/10/3f2a...e1".
+
+    The uploaded file name is kept in the database instead, so odd characters
+    in names never reach file storage.
+    """
+    now = datetime.now(timezone.utc)
+    return f"{now:%Y/%m}/{uuid.uuid4().hex}"
+
+
+def save(file: BinaryIO, content_type: str = "application/octet-stream") -> str:
+    """Store a file and return its storage path.
+
+    `file` is an open file (FastAPI's UploadFile.file). FastAPI has already
+    spooled the upload to a temporary file on disk, so we stream it from
+    there instead of reading it all into memory (Render's free service has
+    little RAM).
+    """
+    path = new_path()
+    file.seek(0)
+    supabase = _supabase()
+    if supabase is None:
+        target = local_dir() / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as out:
+            shutil.copyfileobj(file, out, CHUNK_BYTES)
+        return path
+
+    url, key, bucket = supabase
+    try:
+        # Passing the open file (not its bytes) makes `requests` stream it.
+        response = requests.post(
+            f"{url}/storage/v1/object/{bucket}/{path}",
+            headers={**_headers(key), "Content-Type": content_type, "x-upsert": "false"},
+            data=file,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as error:
+        raise StorageError(f"File storage couldn't be reached: {error}") from error
+    if not response.ok:
+        raise StorageError(f"File storage refused the upload (HTTP {response.status_code}).")
+    return path
+
+
+def open(path: str) -> Iterator[bytes]:  # noqa: A001 - "open" reads naturally here
+    """The bytes of a stored file, one piece at a time (for a StreamingResponse).
+
+    Careful: inside this file, open() now means *this* function, not Python's
+    built-in one, which is why local files are opened with Path.open() here.
+    """
+    supabase = _supabase()
+    if supabase is None:
+        with (local_dir() / path).open("rb") as handle:
+            while piece := handle.read(CHUNK_BYTES):
+                yield piece
+        return
+
+    url, key, bucket = supabase
+    try:
+        response = requests.get(
+            f"{url}/storage/v1/object/{bucket}/{path}",
+            headers=_headers(key),
+            stream=True,  # pass the file on as it arrives, never all in memory
+            timeout=TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as error:
+        raise StorageError(f"File storage couldn't be reached: {error}") from error
+    if not response.ok:
+        raise StorageError(f"File storage couldn't find the file (HTTP {response.status_code}).")
+    with response:
+        yield from response.iter_content(chunk_size=CHUNK_BYTES)
+
+
+def read_all(path: str) -> bytes:
+    """A whole (small) stored file at once. Only used for files up to 5 MB."""
+    return b"".join(open(path))
+
+
+def delete(path: str) -> None:
+    """Delete a stored file. A file that's already gone is not an error."""
+    supabase = _supabase()
+    if supabase is None:
+        try:
+            (local_dir() / path).unlink()
+        except FileNotFoundError:
+            pass
+        return
+
+    url, key, bucket = supabase
+    try:
+        requests.delete(
+            f"{url}/storage/v1/object/{bucket}",
+            headers=_headers(key),
+            json={"prefixes": [path]},
+            timeout=30,
+        )
+    except requests.RequestException as error:
+        # The database row is deleted anyway; the file is just left over.
+        print(f"Storage: couldn't delete {path}: {error}")

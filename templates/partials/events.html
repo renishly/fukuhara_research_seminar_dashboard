@@ -1,0 +1,22 @@
+{# Activity: report() lines plus automatic lines for outputs, monitor changes,
+   deletes and the Inbox. Jinja escapes everything an agent sends. #}
+{% set styles = {"log": "badge-info", "status": "badge-success", "error": "badge-error", "output": "badge-secondary",
+                 "monitor": "badge-accent", "delete": "badge-neutral", "inbox": "badge-primary"} %}
+{% if events %}
+<ul class="divide-y divide-base-content/20">
+  {% for event in events %}
+  <li class="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:gap-4">
+    <div class="flex shrink-0 items-center gap-3">
+      <span class="badge {{ styles.get(event.type, 'badge-ghost') }} badge-sm w-16">{{ event.type }}</span>
+      <time class="font-mono text-xs">{{ event.created_at | jst(seconds=true) }}</time>
+    </div>
+    <p class="min-w-0 break-words">{{ event.message }}</p>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="py-10 text-center text-base-content/70">
+  <p class="text-lg">No activity yet.</p>
+  <p class="mt-1 text-sm">Start the agent and its updates show up here.</p>
+</div>
+{% endif %}

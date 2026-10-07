@@ -1,0 +1,7 @@
+fastapi[standard]>=0.115
+sqlmodel>=0.0.22
+python-dotenv>=1.0
+requests>=2.32
+psycopg[binary]>=3.2
+cryptography>=43.0
+pytest>=8.0

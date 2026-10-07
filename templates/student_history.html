@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "partials/content.html" as content %}
+{% block title %}{{ who(student) }} · {{ kinds | capitalize }}{% endblock %}
+{% block content %}
+<main class="mx-auto max-w-4xl space-y-8 px-4 py-8">
+  <header class="space-y-2">
+    <a href="/classes/{{ course.id }}?tab={{ kinds }}" class="btn btn-ghost btn-sm -ml-3">&larr; {{ mask(course_name(course)) }}</a>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h1 class="page-title text-3xl font-bold tracking-tight break-words">{{ who(student) }}</h1>
+        <p class="text-sm text-base-content/70">{% if not viewer.is_guest %}{{ student_gen }} &middot; {% endif %}{{ kinds | capitalize }} submissions, newest first</p>
+      </div>
+      {% if own %}
+      <button type="button" class="btn btn-primary" hx-get="/classes/{{ course.id }}/{{ kinds }}/submissions/new" hx-target="#modal">+ Create new submission</button>
+      {% endif %}
+    </div>
+  </header>
+
+  {% for s in submissions %}
+  {% set task = tasks.get(s.task_id) %}
+  {# A guest only sees the link when the linked task is visible to guests too. #}
+  {% set show_task = task and (viewer.is_member or task.guest_visible) %}
+  <article class="card">
+    <div class="card-body gap-3 md:flex-row md:items-start">
+      <div class="min-w-0 flex-1 space-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="min-w-0 break-words text-lg font-bold">{{ mask(s.title) if s.title else "Untitled submission" }}</h2>
+          {% if show_task and is_late(s, task) %}<span class="badge due-past badge-sm">Late</span>{% endif %}
+          {% if viewer.is_member and not s.guest_visible %}<span class="badge badge-outline badge-xs">not visible to guests</span>{% endif %}
+        </div>
+        {% if show_task %}
+        <p class="text-sm">For: <a href="/classes/{{ course.id }}/{{ kinds }}" class="link">{{ mask(task.title) }}</a></p>
+        {% endif %}
+        {% if s.description %}<p class="whitespace-pre-line break-words">{{ mask(s.description) }}</p>{% endif %}
+        {{ content.show(s, files, mask) }}
+      </div>
+      <div class="shrink-0 space-y-1 text-right font-mono text-xs">
+        <p>Submitted {{ s.created_at | jst }}</p>
+        {% if s.edited_at %}<p>Edited {{ s.edited_at | jst }}</p>{% endif %}
+        {% if own %}
+        <button type="button" class="btn btn-sm mt-2" hx-get="/submissions/{{ s.id }}/edit" hx-target="#modal">Edit</button>
+        {% elif can_moderate %}
+        <button type="button" class="btn btn-ghost btn-xs mt-2 text-error" hx-post="/submissions/{{ s.id }}/delete"
+                hx-confirm="Delete this submission and its file? (Moderation: this can't be undone.)">Delete</button>
+        {% endif %}
+      </div>
+    </div>
+  </article>
+  {% else %}
+  <p class="text-center text-base-content/70">No submissions yet.</p>
+  {% endfor %}
+</main>
+{% endblock %}

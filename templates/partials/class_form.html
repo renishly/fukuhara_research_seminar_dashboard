@@ -1,0 +1,112 @@
+{% extends "partials/modal.html" %}
+{# The class form (admins), for creating and editing. On a problem the server
+   sends this whole pop-up back with the error; on success it opens the class. #}
+{% block size %}max-w-3xl{% endblock %}
+{% block body %}
+{% set v = values %}
+
+{# A list of students with tick boxes and a search box (Alpine filters it as you type). #}
+{% macro student_picker(field, chosen, label) %}
+<div x-data="{ q: '' }" class="space-y-2">
+  <input type="search" x-model="q" placeholder="Search students&hellip;" class="input input-sm w-full"
+         aria-label="Search students to {{ label }}">
+  <div class="max-h-40 space-y-1 overflow-y-auto border border-base-content/30 bg-white/60 p-2">
+    {% for s in students %}
+    <label class="flex cursor-pointer items-center gap-2 text-sm"
+           data-name="{{ (s.full_name ~ ' gen ' ~ gen_numbers.get(s.gen_id, '')) | lower }}"
+           x-show="!q || $el.dataset.name.includes(q.toLowerCase())">
+      <input type="checkbox" name="{{ field }}" value="{{ s.id }}" class="checkbox checkbox-sm" {{ 'checked' if s.id in chosen }}>
+      <span class="truncate">{{ s.full_name }}</span>
+      <span class="text-xs text-base-content/60">Gen {{ gen_numbers.get(s.gen_id, '?') }}</span>
+    </label>
+    {% else %}
+    <p class="text-sm text-base-content/60">No students have registered yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+<form class="space-y-4" hx-post="{{ '/classes/%d/edit' % course.id if course else '/classes' }}"
+      hx-target="closest .modal" hx-swap="outerHTML"
+      x-data="{
+        names: {{ month_names | tojson | forceescape }},
+        sm: {{ v.start.month }}, sy: {{ v.start.year }}, em: {{ v.end.month }}, ey: {{ v.end.year }},
+        get label() {
+          const from = this.names[this.sm - 1] + ' ' + this.sy, to = this.names[this.em - 1] + ' ' + this.ey;
+          return from === to ? from : from + ' – ' + to;
+        },
+      }">
+  <h3 class="text-lg font-bold">{{ "Edit class" if course else "Create class" }}</h3>
+  {% if error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>{% endif %}
+
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Title (optional)</legend>
+    <input type="text" name="title" value="{{ v.title }}" maxlength="200" class="input w-full" :placeholder="label">
+    <p class="label whitespace-normal">Left empty, the class is called by its timespan (shown in grey above).</p>
+  </fieldset>
+
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Description</legend>
+    <textarea name="description" required rows="4" maxlength="5000" class="textarea w-full">{{ v.description }}</textarea>
+  </fieldset>
+
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Timespan</legend>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-sm">From</span>
+      <select name="start_month" x-model.number="sm" class="select select-sm w-auto" aria-label="Start month">
+        {% for name in month_names %}<option value="{{ loop.index }}" {{ 'selected' if loop.index == v.start.month }}>{{ name }}</option>{% endfor %}
+      </select>
+      <select name="start_year" x-model.number="sy" class="select select-sm w-auto" aria-label="Start year">
+        {% for year in years %}<option value="{{ year }}" {{ 'selected' if year == v.start.year }}>{{ year }}</option>{% endfor %}
+      </select>
+      <span class="text-sm">to</span>
+      <select name="end_month" x-model.number="em" class="select select-sm w-auto" aria-label="End month">
+        {% for name in month_names %}<option value="{{ loop.index }}" {{ 'selected' if loop.index == v.end.month }}>{{ name }}</option>{% endfor %}
+      </select>
+      <select name="end_year" x-model.number="ey" class="select select-sm w-auto" aria-label="End year">
+        {% for year in years %}<option value="{{ year }}" {{ 'selected' if year == v.end.year }}>{{ year }}</option>{% endfor %}
+      </select>
+    </div>
+  </fieldset>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Enrolled</legend>
+      <p class="text-xs text-base-content/70">Enrolled students get a cell and can submit and add agents. A gen includes students who register later.</p>
+      <div class="flex flex-wrap gap-x-3 gap-y-1">
+        {% for gen in gens %}
+        <label class="flex cursor-pointer items-center gap-1 text-sm">
+          <input type="checkbox" name="enrolled_gen" value="{{ gen.id }}" class="checkbox checkbox-sm" {{ 'checked' if gen.id in v.enrolled_gens }}>
+          Gen {{ gen.number }}
+        </label>
+        {% endfor %}
+      </div>
+      {{ student_picker("enrolled_user", v.enrolled_users, "enrol") }}
+    </fieldset>
+
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Hidden from</legend>
+      <p class="text-xs text-base-content/70">Nothing is hidden by default. Enrolled students always see their classes.</p>
+      <label class="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+        <input type="checkbox" name="hidden_from_guests" value="true" class="checkbox checkbox-sm" {{ 'checked' if v.hidden_from_guests }}>
+        Guests
+      </label>
+      <div class="flex flex-wrap gap-x-3 gap-y-1">
+        {% for gen in gens %}
+        <label class="flex cursor-pointer items-center gap-1 text-sm">
+          <input type="checkbox" name="hidden_gen" value="{{ gen.id }}" class="checkbox checkbox-sm" {{ 'checked' if gen.id in v.hidden_gens }}>
+          Gen {{ gen.number }}
+        </label>
+        {% endfor %}
+      </div>
+      {{ student_picker("hidden_user", v.hidden_users, "hide from") }}
+    </fieldset>
+  </div>
+
+  <div class="modal-action">
+    <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
+    <button type="submit" class="btn btn-primary">{{ "Save class" if course else "Create class" }}</button>
+  </div>
+</form>
+{% endblock %}

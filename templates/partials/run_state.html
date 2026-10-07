@@ -1,0 +1,7 @@
+{# Whether the dashboard has this agent paused. The Controls' replies send it
+   back "out of band" so it updates straight away. #}
+<span id="run-state" {% if oob %}hx-swap-oob="true"{% endif %}
+      class="badge {{ 'badge-outline' if agent.paused else 'badge-ghost' }}"
+      title="{{ 'Paused: outputs and monitor updates are held until Start' if agent.paused else 'Running' }}">
+  {{ "&#9208; paused" | safe if agent.paused else "&#9654; running" | safe }}
+</span>

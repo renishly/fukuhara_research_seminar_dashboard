@@ -1,0 +1,14 @@
+{
+  "name": "fukuhara-seminar-styles",
+  "private": true,
+  "description": "Only builds static/tailwind.css from tailwind.input.css. The website itself needs no Node.js.",
+  "scripts": {
+    "build:css": "tailwindcss -i tailwind.input.css -o static/tailwind.css --minify",
+    "watch:css": "tailwindcss -i tailwind.input.css -o static/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

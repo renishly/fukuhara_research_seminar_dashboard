@@ -1,0 +1,71 @@
+{% extends "partials/modal.html" %}
+{# The submission form (the student's own). Content is a file (the default)
+   or text. The dropdown lists the 5 most recent assignments/exams of this tab;
+   "Show older..." adds the rest. #}
+{% block body %}
+{% set v = values %}
+<form class="space-y-3" hx-post="{{ '/submissions/%d/edit' % submission.id if submission else '/classes/%d/%s/submissions' % (course.id, kinds) }}"
+      hx-encoding="multipart/form-data" hx-target="closest .modal" hx-swap="outerHTML"
+      x-data="{ mode: '{{ v.mode }}', older: {{ 'true' if show_older else 'false' }}, deleting: false }">
+  <h3 class="text-lg font-bold">{{ "Edit submission" if submission else "New submission" }}</h3>
+  {% if error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>{% endif %}
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Title (optional)</legend>
+    <input type="text" name="title" value="{{ v.title }}" maxlength="200" class="input w-full">
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Description (optional)</legend>
+    <textarea name="description" rows="3" maxlength="5000" class="textarea w-full">{{ v.description }}</textarea>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Linked {{ kind }} (optional)</legend>
+    <select name="task_id" class="select w-full"
+            @change="if ($event.target.value === 'older') { older = true; $event.target.value = ''; }">
+      <option value="">None</option>
+      {% for t in recent %}
+      <option value="{{ t.id }}" {{ 'selected' if t.id == v.task_id }}>{{ t.title }} &middot; due {{ t.due_at | jst }}{% if due_status(t.due_at) == 'past' %} &middot; Past due{% endif %}</option>
+      {% endfor %}
+      {% if older %}
+      <option value="older" x-show="!older">Show older&hellip;</option>
+      <template x-if="older">
+        <optgroup label="Older">
+          {% for t in older %}
+          <option value="{{ t.id }}" {{ 'selected' if t.id == v.task_id }}>{{ t.title }} &middot; due {{ t.due_at | jst }}{% if due_status(t.due_at) == 'past' %} &middot; Past due{% endif %}</option>
+          {% endfor %}
+        </optgroup>
+      </template>
+      {% endif %}
+    </select>
+    <p class="label whitespace-normal">Linking puts it under that {{ kind }} on the history page. None is fine too.</p>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Content</legend>
+    <div class="join">
+      <input type="radio" name="mode" value="file" aria-label="File" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+      <input type="radio" name="mode" value="text" aria-label="Text" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
+    </div>
+    <div x-show="mode === 'file'" class="mt-2 space-y-1">
+      <input type="file" name="file" class="file-input w-full">
+      <p class="label whitespace-normal">Up to 50 MB.{% if current_file %} Now: <strong>{{ current_file.filename }}</strong> (choose a file to replace it).{% endif %}</p>
+    </div>
+    <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="6" maxlength="50000" class="textarea mt-2 w-full">{{ v.content_text }}</textarea>
+  </fieldset>
+  <label class="flex cursor-pointer items-start gap-2 text-sm">
+    <input type="checkbox" name="guest_visible" value="true" class="checkbox checkbox-sm mt-0.5" {{ 'checked' if v.guest_visible }}>
+    <span><strong>Visible to guests.</strong> Guests then see it in full. Names in text are hidden from them
+      automatically, but <strong>names inside a file are not</strong>: files are shown exactly as uploaded.</span>
+  </label>
+  <div class="modal-action flex-wrap">
+    {% if submission %}
+    <button type="button" class="btn btn-error btn-outline mr-auto" x-show="!deleting" @click="deleting = true">Delete</button>
+    <span x-show="deleting" x-cloak class="mr-auto flex items-center gap-2 text-sm">
+      Delete it for good?
+      <button type="button" class="btn btn-error btn-sm" hx-post="/submissions/{{ submission.id }}/delete">Delete</button>
+      <button type="button" class="btn btn-ghost btn-sm" @click="deleting = false">No</button>
+    </span>
+    {% endif %}
+    <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
+    <button type="submit" class="btn btn-primary">{{ "Save" if submission else "Submit" }}</button>
+  </div>
+</form>
+{% endblock %}

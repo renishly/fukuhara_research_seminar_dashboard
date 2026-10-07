@@ -1,0 +1,27 @@
+{# How one output is shown, by its kind. Used on the agent's page (full size)
+   and on grid cards (compact=true, for the pinned category).
+   Everything is escaped by Jinja; links are only ever http(s) (checked on arrival).
+   Files go through /files/{id}, which checks permissions; only PNG, JPEG, GIF
+   and WebP images are shown inline. @click.stop keeps a click inside a grid
+   card from also opening the agent page. #}
+{% macro content(output, file=None, inline_types=(), compact=false) %}
+  {% if output.kind == "number" %}
+    <p class="font-mono {{ 'text-lg' if compact else 'text-2xl' }} font-semibold">{{ output.value }}</p>
+  {% elif output.kind == "link" %}
+    <a href="{{ output.value }}" target="_blank" rel="noopener noreferrer" @click.stop
+       class="link break-all {{ 'text-sm line-clamp-1' if compact }}">{{ output.value }}</a>
+  {% elif output.kind == "json" %}
+    {% if compact %}<p class="line-clamp-2 break-all font-mono text-xs">{{ output.value }}</p>
+    {% else %}<pre class="max-h-64 overflow-auto bg-white/70 p-3 text-xs">{{ output.value }}</pre>{% endif %}
+  {% elif output.kind == "file" %}
+    {% if file and file.content_type in inline_types and not compact %}
+      <a href="/files/{{ output.file_id }}" target="_blank" class="block w-fit">
+        <img src="/files/{{ output.file_id }}" alt="{{ output.value }}" loading="lazy" class="max-h-64 border border-base-content/40">
+      </a>
+    {% endif %}
+    <p class="{{ 'text-sm' if compact }}">&#128206; <a href="/files/{{ output.file_id }}" class="link break-all" @click.stop>{{ output.value }}</a>
+      {% if file and not compact %}<span class="text-xs text-base-content/60">({{ file.size | human_size }})</span>{% endif %}</p>
+  {% else %}
+    <p class="break-words {{ 'text-sm line-clamp-2' if compact else 'whitespace-pre-wrap' }}">{{ output.value }}</p>
+  {% endif %}
+{% endmacro %}

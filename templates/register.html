@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+{# The Student/Admin switch only changes which fields show (Alpine.js); the
+   server checks everything again, including the registration key. #}
+<main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-4 py-10">
+  <h1 class="page-title text-3xl font-bold tracking-tight">Register</h1>
+  <section class="card" x-data="{ role: '{{ form.role or 'student' }}' }">
+    <form method="post" action="/register" class="card-body gap-3">
+      <div class="join w-full" role="radiogroup" aria-label="Account type">
+        <input type="radio" name="role" value="student" aria-label="Student" class="join-item btn flex-1"
+               x-model="role" {{ 'checked' if form.role != 'admin' }}>
+        <input type="radio" name="role" value="admin" aria-label="Admin" class="join-item btn flex-1"
+               x-model="role" {{ 'checked' if form.role == 'admin' }}>
+      </div>
+
+      {% if form.error %}
+      <div role="alert" class="alert alert-error alert-soft text-sm">{{ form.error }}</div>
+      {% endif %}
+      <p x-show="role === 'student'" class="text-sm {{ '' if student_open else 'text-error' }}">
+        {{ "Students need the student registration key from an admin." if student_open else "Student registration is switched off." }}
+      </p>
+      <p x-show="role === 'admin'" x-cloak class="text-sm {{ '' if admin_open else 'text-error' }}">
+        {{ "Admins need the admin registration key." if admin_open else "Admin registration is switched off." }}
+      </p>
+
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Login ID</legend>
+        <input type="text" name="login_id" value="{{ form.login_id or '' }}" required minlength="3" maxlength="30"
+               pattern="[A-Za-z0-9._\-]{3,30}" autocomplete="username" autocapitalize="none" spellcheck="false"
+               class="input w-full">
+        <p class="label whitespace-normal">What you type to sign in: 3&ndash;30 letters, digits, &ldquo;.&rdquo;, &ldquo;_&rdquo; or &ldquo;-&rdquo;.</p>
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Full name</legend>
+        <input type="text" name="full_name" value="{{ form.full_name or '' }}" required maxlength="100"
+               autocomplete="name" class="input w-full">
+        <p class="label whitespace-normal">Shown to members. Japanese is fine.</p>
+      </fieldset>
+      <fieldset class="fieldset" x-show="role === 'student'">
+        <legend class="fieldset-legend">Gen</legend>
+        <select name="gen_id" class="select w-full" :required="role === 'student'" :disabled="role !== 'student'">
+          <option value="">Choose your gen&hellip;</option>
+          {% for gen in gens %}
+          <option value="{{ gen.id }}" {{ 'selected' if form.gen_id == gen.id }}>Gen {{ gen.number }}</option>
+          {% endfor %}
+        </select>
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Password</legend>
+        <input type="password" name="password" required minlength="8" autocomplete="new-password" class="input w-full">
+        <p class="label">At least 8 characters.</p>
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Password again</legend>
+        <input type="password" name="password_again" required minlength="8" autocomplete="new-password" class="input w-full">
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend" x-text="role === 'admin' ? 'Admin registration key' : 'Student registration key'">Registration key</legend>
+        <input type="password" name="registration_key" required autocomplete="off" class="input w-full">
+      </fieldset>
+      <button type="submit" class="btn btn-primary w-full">Create account</button>
+      <p class="text-sm"><a href="/login" class="link">&larr; Back to sign in</a></p>
+    </form>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,14 @@
+{# The zoom buttons. They send the month now in the middle of the timeline
+   (timelineCenter() in ui.js), so zooming keeps the same date in the middle.
+   Sent again "out of band" with each zoomed timeline, to update the level. #}
+<div id="zoom-controls" class="join" {% if oob %}hx-swap-oob="true"{% endif %}>
+  <button type="button" class="btn btn-sm join-item" aria-label="Zoom out" title="Zoom out"
+          {{ 'disabled' if timeline.zoom == 0 }}
+          hx-get="/classes/timeline" hx-target="#timeline-frame"
+          hx-vals='js:{zoom: {{ timeline.zoom - 1 }}, center: timelineCenter()}'>&minus;</button>
+  <span class="btn btn-sm join-item pointer-events-none" aria-live="polite">Zoom {{ timeline.zoom + 1 }}/{{ zoom_levels | length }}</span>
+  <button type="button" class="btn btn-sm join-item" aria-label="Zoom in" title="Zoom in"
+          {{ 'disabled' if timeline.zoom == zoom_levels | length - 1 }}
+          hx-get="/classes/timeline" hx-target="#timeline-frame"
+          hx-vals='js:{zoom: {{ timeline.zoom + 1 }}, center: timelineCenter()}'>+</button>
+</div>
