@@ -226,7 +226,7 @@ The site creates its tables (and Gen 1–12) by itself the first time it starts.
 
 ### 2. Push the project to GitHub
 
-The project's git repository is the `app/` folder. Create an empty repository on GitHub named `fukuhara-seminar` (for example `renishly/fukuhara-seminar`), then, in `app/`:
+The project's git repository is the `app/` folder. The repository on GitHub is `renishly/fukuhara_research_seminar_dashboard` (private; it must be empty before the first push). Then, in `app/`:
 
 ```bash
 git add -A
@@ -237,7 +237,7 @@ git commit -m "First version of the seminar dashboard"
 ```
 
 ```bash
-git remote add origin https://github.com/renishly/fukuhara-seminar.git
+git remote add origin https://github.com/renishly/fukuhara_research_seminar_dashboard.git
 ```
 
 ```bash
@@ -249,7 +249,7 @@ Check first that `git status` doesn't list `.env`, `local.db` or `local_files/` 
 ### 3. Render: deploy with the Blueprint
 
 1. Sign up at <https://render.com> and connect your GitHub account.
-2. **New** → **Blueprint**, and choose the `fukuhara-seminar` repository. Render reads `render.yaml`: one free web service called `fukuhara-seminar` in Singapore.
+2. **New** → **Blueprint**, and choose the `fukuhara_research_seminar_dashboard` repository. Render reads `render.yaml`: one free web service called `fukuhara-seminar` in Singapore.
 3. Render asks for the secret values (they're marked `sync: false`, so they're never stored in GitHub): `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ADMIN_REGISTRATION_KEY`, `STUDENT_REGISTRATION_KEY` and `KEY_ENCRYPTION_SECRET`. Use new random values for the keys (see above), not your local ones. `SUPABASE_BUCKET` is already set to `seminar-files`.
 4. Click **Apply**. The first build takes a few minutes. Your site is then at `https://fukuhara-seminar.onrender.com` (or similar: see the service's page).
 5. Register the first admin there, as you did locally.
