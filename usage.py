@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 from sqlmodel import Session, func, select
 
-from db import Agent, Course, Event, InboxFile, Output, StoredFile, Submission, Task, User, database_size
+from db import Agent, Course, Event, InboxFile, Monitor, Output, StoredFile, Submission, Task, User, database_size
 from permissions import course_name
 
 # Pie slice colours, always used in this order (checked for colour-blind
@@ -31,7 +31,8 @@ LARGEST_FILES = 20
 TABLE_NAMES = {
     "event": "Agent activity lines", "output": "Agent outputs", "submission": "Submissions (text)",
     "task": "Assignments and exams", "user": "Accounts", "loginsession": "Sign-ins (sessions)",
-    "agent": "Agents", "command": "Agent commands", "storedfile": "File records",
+    "agent": "Agents", "command": "Agent commands", "monitor": "Agent monitors",
+    "monitornotifysetting": "Notify bells (monitors)", "storedfile": "File records",
     "course": "Classes", "classvisit": "Class visits (notification marks)",
     "inboxfile": "Inbox records", "notifysetting": "Notify bells", "folder": "Folders",
     "agentfolder": "Folder tags", "gen": "Gens", "courseenrolledgen": "Enrolment (gens)",
@@ -152,9 +153,9 @@ def file_breakdown(db: Session) -> list[View]:
     for output in db.exec(select(Output).where(Output.file_id.is_not(None))).all():
         agent = agents.get(output.agent_id)
         owners[output.file_id] = ("Agent output files", agent and agent.course_id, agent and agent.owner_id, output.agent_id)
-    for agent in agents.values():
-        if agent.monitor_file_id:
-            owners[agent.monitor_file_id] = ("Monitor PDFs", agent.course_id, agent.owner_id, agent.id)
+    for monitor in db.exec(select(Monitor).where(Monitor.file_id.is_not(None))).all():
+        agent = agents.get(monitor.agent_id)
+        owners[monitor.file_id] = ("Monitor files", agent and agent.course_id, agent and agent.owner_id, monitor.agent_id)
     for item in db.exec(select(InboxFile)).all():
         agent = agents.get(item.agent_id)
         owners[item.file_id] = ("Inbox files (waiting)", agent and agent.course_id, agent and agent.owner_id, item.agent_id)
@@ -179,7 +180,7 @@ def file_breakdown(db: Session) -> list[View]:
         finish(View("files-class", "By class", [Row(class_label(courses, k), v) for k, v in by_class.items()])),
         finish(View("files-person", "By person", [Row(person_label(users, k), v) for k, v in by_person.items()])),
         finish(View("files-agent", "By agent", [Row(agent_label(agents, users, k), v) for k, v in by_agent.items()],
-                    note="Agent output files, monitor PDFs and waiting Inbox files.")),
+                    note="Agent output files, monitor files and waiting Inbox files.")),
         finish(View("files-largest", "Largest files", largest, pie=False)),
     ]
 

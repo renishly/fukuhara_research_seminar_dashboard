@@ -26,6 +26,8 @@ from db import (
     Event,
     Gen,
     InboxFile,
+    Monitor,
+    MonitorNotifySetting,
     NotifySetting,
     Output,
     Submission,
@@ -145,11 +147,16 @@ def delete_task(db: Session, task: Task) -> None:
 
 
 def delete_agent(db: Session, agent: Agent) -> None:
-    """Delete an agent with its activity, commands, outputs (and their files),
-    folder tags, notify bells, monitor PDF and Inbox files."""
+    """Delete an agent with its activity, commands, outputs and monitors (and
+    their files), folder tags, notify bells and Inbox files."""
     for output in db.exec(select(Output).where(Output.agent_id == agent.id)).all():
         file_id = output.file_id
         db.delete(output)
+        db.flush()
+        delete_stored_file(db, file_id)
+    for monitor in db.exec(select(Monitor).where(Monitor.agent_id == agent.id)).all():
+        file_id = monitor.file_id
+        db.delete(monitor)
         db.flush()
         delete_stored_file(db, file_id)
     for item in db.exec(select(InboxFile).where(InboxFile.agent_id == agent.id)).all():
@@ -157,12 +164,9 @@ def delete_agent(db: Session, agent: Agent) -> None:
         db.delete(item)
         db.flush()
         delete_stored_file(db, file_id)
-    for model in (Event, Command, AgentFolder, NotifySetting):
+    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting):
         db.exec(delete(model).where(model.agent_id == agent.id))
-    monitor_file = agent.monitor_file_id
     db.delete(agent)
-    db.flush()
-    delete_stored_file(db, monitor_file)
 
 
 def delete_course(db: Session, course: Course) -> None:

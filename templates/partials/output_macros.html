@@ -1,5 +1,8 @@
-{# How one output is shown, by its kind. Used on the agent's page (full size)
-   and on grid cards (compact=true, for the pinned category).
+{# How one output or monitor value is shown, by its kind. Used on the agent's
+   page (full size) and on grid cards (compact=true, for the pinned item).
+   A "pdf" (monitors only, real PDFs) is shown in the browser's own PDF viewer;
+   hx-preserve keeps that viewer (and the reader's place) while the list
+   refreshes, until the PDF itself is replaced (its id changes).
    Everything is escaped by Jinja; links are only ever http(s) (checked on arrival).
    Files go through /files/{id}, which checks permissions; only PNG, JPEG, GIF
    and WebP images are shown inline. @click.stop keeps a click inside a grid
@@ -13,6 +16,14 @@
   {% elif output.kind == "json" %}
     {% if compact %}<p class="line-clamp-2 break-all font-mono text-xs">{{ output.value }}</p>
     {% else %}<pre class="max-h-64 overflow-auto bg-white/70 p-3 text-xs">{{ output.value }}</pre>{% endif %}
+  {% elif output.kind == "pdf" %}
+    {% set view_url = "/agents/%d/monitors/%d/view" % (output.agent_id, output.id) %}
+    {% if not compact %}
+    <iframe id="monitor-pdf-{{ output.file_id }}" hx-preserve="true" src="{{ view_url }}#view=FitH" title="{{ output.value }}"
+            class="h-[70vh] min-h-96 w-full border border-base-content/40 bg-white"></iframe>
+    {% endif %}
+    <p class="{{ 'text-sm' if compact }}">&#128196; <a href="{{ view_url }}" target="_blank" class="link break-all" @click.stop>{{ output.value }}</a>
+      {% if not compact %}<span class="text-xs text-base-content/60">(some phones only show the first page here: open it to read it all)</span>{% endif %}</p>
   {% elif output.kind == "file" %}
     {% if file and file.content_type in inline_types and not compact %}
       <a href="/files/{{ output.file_id }}" target="_blank" class="block w-fit">

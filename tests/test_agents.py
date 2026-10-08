@@ -12,7 +12,7 @@ from requests.structures import CaseInsensitiveDict
 from sqlmodel import Session, select
 
 from conftest import PASSWORD, api, key_for
-from db import Agent, Command, Event, InboxFile, Output, StoredFile, utc_now
+from db import Agent, Command, Event, InboxFile, Monitor, Output, StoredFile, utc_now
 from routes.agent_tools import is_online
 from security import decrypt_api_key, hash_api_key
 
@@ -76,9 +76,9 @@ def test_owner_only_routes_refuse_everyone_else(engine, client, admin, taro, han
         ("post", f"/agents/{agent}/command", {"command": "start"}),
         ("post", f"/agents/{agent}/rename", {"name": "stolen"}),
         ("post", f"/agents/{agent}/description", {"description": "x"}),
-        ("post", f"/agents/{agent}/monitor", {"url": "https://example.com"}),
-        ("post", f"/agents/{agent}/monitor/pin", {}),
-        ("post", f"/agents/{agent}/outputs/pin", {"category": "x"}),
+        ("post", f"/agents/{agent}/monitors/link", {"name": "Sheet", "url": "https://example.com"}),
+        ("post", f"/agents/{agent}/monitors/pin", {"name": "x"}),
+        ("post", f"/agents/{agent}/outputs/pin", {"name": "x"}),
         ("post", f"/agents/{agent}/key/view", {"password": PASSWORD}),
         ("post", f"/agents/{agent}/key/replace", {"password": PASSWORD}),
         ("post", f"/agents/{agent}/delete", {"password": PASSWORD}),
@@ -104,7 +104,7 @@ def test_members_can_read_other_agents_but_guests_only_see_the_grid(taro, hanako
     assert guest.get(f"/agents/{agent}").status_code == 403
     assert guest.get(f"/agents/{agent}/outputs", params={"all": "true"}).status_code == 403
     assert guest.get(f"/agents/{agent}/events").status_code == 403
-    assert guest.get(f"/agents/{agent}/monitor").status_code == 403
+    assert guest.get(f"/agents/{agent}/monitors").status_code == 403
     grid = guest.get(f"/classes/{course}/agents/{taro.id}").text
     assert "helper" in grid and "Finds papers for" in grid and "online" in grid
     assert "Yamada Taro" not in grid  # names hidden from guests, even in descriptions
@@ -245,11 +245,12 @@ def test_late_items_land_at_their_real_time(engine, client, taro, course, create
 
 def test_late_monitor_update_older_than_the_current_one_is_skipped(client, taro, course, create_agent, engine):
     create_agent(taro, course, "helper")
-    client.put("/api/monitor", json={"url": "https://example.com/new"}, headers=api("helper"))
+    client.put("/api/monitors", json={"name": "Sheet", "content": "https://example.com/new"}, headers=api("helper"))
     old = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    reply = client.put("/api/monitor", json={"url": "https://example.com/old", "created_at": old}, headers=api("helper"))
+    reply = client.put("/api/monitors", json={"name": "Sheet", "content": "https://example.com/old", "created_at": old},
+                       headers=api("helper"))
     assert reply.json()["applied"] is False
-    assert rows(engine, Agent)[0].monitor_url == "https://example.com/new"
+    assert rows(engine, Monitor)[0].value == "https://example.com/new"
 
 
 def test_commands_start_pause_and_messages(engine, client, taro, course, create_agent):
@@ -335,14 +336,25 @@ def test_output_kinds_and_file_limits(engine, client, taro, course, create_agent
 
 def test_monitor_pdf_is_shown_inline_and_replaced(engine, client, taro, course, create_agent):
     agent_id = create_agent(taro, course, "helper")
-    client.post("/api/monitor/file", files={"file": ("one.pdf", b"%PDF-1.4 one", "application/pdf")}, headers=api("helper"))
+    send = {"name": "Summary"}
+    client.post("/api/monitors/file", data=send, files={"file": ("one.pdf", b"%PDF-1.4 one", "application/pdf")},
+                headers=api("helper"))
     first = rows(engine, StoredFile)[0]
-    pdf = taro.get(f"/agents/{agent_id}/monitor.pdf")
+    monitor = rows(engine, Monitor)[0]
+    assert monitor.kind == "pdf"
+    pdf = taro.get(f"/agents/{agent_id}/monitors/{monitor.id}/view")
     assert pdf.headers["content-type"] == "application/pdf" and pdf.headers["content-disposition"].startswith("inline")
-    client.post("/api/monitor/file", files={"file": ("two.pdf", b"%PDF-1.4 two", "application/pdf")}, headers=api("helper"))
-    assert [f.filename for f in rows(engine, StoredFile)] == ["two.pdf"]
+    client.post("/api/monitors/file", data=send, files={"file": ("two.pdf", b"%PDF-1.4 two", "application/pdf")},
+                headers=api("helper"))
+    assert [f.filename for f in rows(engine, StoredFile)] == ["two.pdf"]  # replaced, and the old file deleted
     assert not (Path(os.environ["LOCAL_FILES_DIR"]) / first.storage_path).exists()
-    assert "two.pdf" in taro.get(f"/agents/{agent_id}/monitor").text
+    page = taro.get(f"/agents/{agent_id}/monitors", params={"c": "Summary"}).text
+    assert "two.pdf" in page and 'hx-preserve="true"' in page
+    # A file that only claims to be a PDF is kept as a plain download, never shown inline.
+    client.post("/api/monitors/file", data={"name": "Fake"}, files={"file": ("x.pdf", b"<html>", "application/pdf")},
+                headers=api("helper"))
+    fake = next(m for m in rows(engine, Monitor) if m.name == "Fake")
+    assert fake.kind == "file" and taro.get(f"/agents/{agent_id}/monitors/{fake.id}/view").status_code == 404
 
 
 # --- Reading and deleting through the API ---------------------------------------------------
@@ -416,8 +428,9 @@ def test_agents_delete_only_their_own_data(engine, client, taro, hanako, course,
     client.post("/api/outputs", json={"category": "y", "content": "2"}, headers=api("a-agent"))
     assert client.delete("/api/outputs", params={"category": "x"}, headers=api("a-agent")).json() == {"deleted": 1}
     assert client.delete("/api/outputs", params={"all": "true"}, headers=api("a-agent")).json() == {"deleted": 1}
-    client.put("/api/monitor", json={"url": "https://example.com"}, headers=api("a-agent"))
-    assert client.delete("/api/monitor", headers=api("a-agent")).json() == {"deleted": 1}
+    client.put("/api/monitors", json={"name": "m", "content": 1}, headers=api("a-agent"))
+    assert client.delete("/api/monitors", params={"name": "m"}, headers=api("b-agent")).json() == {"deleted": 0}
+    assert client.delete("/api/monitors", params={"name": "m"}, headers=api("a-agent")).json() == {"deleted": 1}
 
 
 def test_reads_never_include_commands_or_inbox(client, taro, course, create_agent):
@@ -439,13 +452,141 @@ def test_outputs_filter_pin_and_bell(engine, client, taro, hanako, course, creat
     assert "2 outputs available" in first_visit and "Headline" not in first_visit
     chosen = taro.get(f"/agents/{agent_id}/outputs", params={"c": "news"}).text
     assert "Headline" in chosen and ">7<" not in chosen
-    taro.post(f"/agents/{agent_id}/outputs/pin", data={"category": "news"})
+    taro.post(f"/agents/{agent_id}/outputs/pin", data={"name": "news"})
     assert agent_row(engine, agent_id).pinned_category == "news"
     assert "Headline" in taro.get(f"/agents/{agent_id}").text  # a pinned category starts ticked
     assert "Headline" in hanako.get(f"/classes/{course}/agents/{taro.id}").text  # and shows on the card
-    hanako.post(f"/agents/{agent_id}/outputs/notify", data={"category": "news"})  # bells are per viewer
+    hanako.post(f"/agents/{agent_id}/outputs/notify", data={"name": "news"})  # bells are per viewer
     assert "Notifications on" in hanako.get(f"/agents/{agent_id}/outputs", params={"c": "news", "known": "x"}).text
     assert "Notifications on" not in taro.get(f"/agents/{agent_id}/outputs", params={"c": "news", "known": "x"}).text
+
+
+# --- Monitors: named datapoints, replaced by each new value --------------------------------
+
+
+def put_monitor(client, name, content, agent="helper", **extra):
+    return client.put("/api/monitors", json={"name": name, "content": content, **extra}, headers=api(agent))
+
+
+def test_an_agent_has_many_monitors_each_replaced_not_added(engine, client, taro, course, create_agent):
+    create_agent(taro, course, "helper")
+    put_monitor(client, "Temperature", 21.5)
+    put_monitor(client, "Status", "Collecting papers")
+    put_monitor(client, "Sheet", "https://example.com/sheet")
+    put_monitor(client, "Counts", {"papers": 12})
+    put_monitor(client, "Temperature", 22.0)  # replaces, doesn't add
+    monitors = {m.name: m for m in rows(engine, Monitor)}
+    assert set(monitors) == {"Temperature", "Status", "Sheet", "Counts"}
+    assert (monitors["Temperature"].kind, monitors["Temperature"].value) == ("number", "22.0")
+    assert monitors["Sheet"].kind == "link" and monitors["Counts"].kind == "json"
+    assert rows(engine, Output) == []  # monitors are not outputs
+    events = [e.message for e in rows(engine, Event)]
+    assert events.count('New monitor "Temperature"') == 1  # creating is logged; updates aren't
+    put_monitor(client, "Status", None)  # null content removes it
+    assert "Status" not in {m.name for m in rows(engine, Monitor)}
+    assert any('Monitor "Status" removed' in e for e in [e.message for e in rows(engine, Event)])
+    assert put_monitor(client, "", 1).status_code == 422 and put_monitor(client, "x" * 51, 1).status_code == 422
+
+
+def test_monitors_have_the_same_filter_pins_and_bells_as_outputs(engine, client, taro, hanako, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    put_monitor(client, "Temperature", 21.5)
+    put_monitor(client, "Status", "All good")
+    client.post("/api/outputs", json={"category": "news", "content": "Headline"}, headers=api("helper"))
+    first_visit = taro.get(f"/agents/{agent_id}").text
+    assert "2 monitors available" in first_visit and "All good" not in first_visit  # nothing until chosen
+    chosen = taro.get(f"/agents/{agent_id}/monitors", params={"c": "Status"}).text
+    assert "All good" in chosen and "21.5" not in chosen
+    everything = taro.get(f"/agents/{agent_id}/monitors", params={"all": "true", "sort": "name", "order": "asc"}).text
+    assert everything.index("Status") < everything.index("Temperature")
+    # One pin per agent, shared with outputs: pinning a monitor unpins the category.
+    taro.post(f"/agents/{agent_id}/outputs/pin", data={"name": "news"})
+    reply = taro.post(f"/agents/{agent_id}/monitors/pin", data={"name": "Status"})
+    agent = agent_row(engine, agent_id)
+    assert agent.pinned_monitor_name == "Status" and agent.pinned_category is None
+    assert 'id="pin-outputs-' in reply.text and 'hx-swap-oob="true"' in reply.text  # the outputs pin, unpinned
+    assert "All good" in taro.get(f"/agents/{agent_id}").text  # a pinned monitor starts ticked
+    card = hanako.get(f"/classes/{course}/agents/{taro.id}").text
+    assert "Status" in card and "All good" in card  # and shows its current value on the card
+    put_monitor(client, "Status", "Paused for lunch")
+    assert "Paused for lunch" in hanako.get(f"/classes/{course}/agents/{taro.id}").text
+    hanako.post(f"/agents/{agent_id}/monitors/notify", data={"name": "Status"})  # bells are per viewer
+    assert "Notifications on" in hanako.get(f"/agents/{agent_id}/monitors", params={"known": "x"}).text
+    assert "Notifications on" not in taro.get(f"/agents/{agent_id}/monitors", params={"known": "x"}).text
+    assert hanako.post(f"/agents/{agent_id}/monitors/pin", data={"name": "Status"}).status_code == 403
+
+
+def test_owner_sets_and_removes_link_monitors_in_settings(engine, taro, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    taro.post(f"/agents/{agent_id}/monitors/link", data={"name": "Sheet", "url": "https://example.com/a"})
+    taro.post(f"/agents/{agent_id}/monitors/link", data={"name": "Board", "url": "https://example.com/b"})
+    assert {m.name: m.value for m in rows(engine, Monitor)} == {"Sheet": "https://example.com/a",
+                                                                "Board": "https://example.com/b"}
+    bad = taro.post(f"/agents/{agent_id}/monitors/link", data={"name": "Bad", "url": "javascript:alert(1)"})
+    assert "must start with http" in bad.text
+    taro.post(f"/agents/{agent_id}/monitors/link", data={"name": "Sheet", "url": ""})  # empty link removes it
+    assert [m.name for m in rows(engine, Monitor)] == ["Board"]
+
+
+def test_agents_read_monitors_of_their_class_only(client, taro, hanako, course, create_agent, create_class):
+    create_agent(taro, course, "reader")
+    create_agent(hanako, course, "writer")
+    elsewhere = create_agent(taro, create_class(title="Other", enrolled_gens=[9]), "far-away")
+    put_monitor(client, "Temperature", 21.5, agent="writer")
+    client.post("/api/monitors/file", data={"name": "Report"}, files={"file": ("r.pdf", b"%PDF-1.4 r", "application/pdf")},
+                headers=api("writer"))
+    monitors = client.get("/api/agents/writer/monitors", headers=api("reader")).json()
+    assert [m["name"] for m in monitors] == ["Report", "Temperature"]
+    assert monitors[1]["content"] == 21.5 and monitors[0]["kind"] == "pdf"
+    assert client.get(monitors[0]["file"]["url"], headers=api("reader")).content == b"%PDF-1.4 r"
+    one = client.get("/api/agents/writer/monitors", params={"name": "Temperature"}, headers=api("reader")).json()
+    assert len(one) == 1
+    assert client.get("/api/agents/writer", headers=api("reader")).json()["monitors"] == ["Report", "Temperature"]
+    assert client.get(f"/api/agents/{elsewhere}/monitors", headers=api("reader")).status_code == 404
+
+
+def test_monitor_cap_per_agent(client, taro, course, create_agent, monkeypatch):
+    import routes.agent_tools
+    monkeypatch.setattr(routes.agent_tools, "MAX_MONITORS_PER_AGENT", 2)
+    create_agent(taro, course, "helper")
+    assert put_monitor(client, "a", 1).status_code == 200 and put_monitor(client, "b", 2).status_code == 200
+    assert put_monitor(client, "c", 3).status_code == 422
+    assert put_monitor(client, "a", 9).status_code == 200  # replacing an existing one is always fine
+
+
+def test_older_connectors_single_monitor_still_works(engine, client, taro, course, create_agent):
+    create_agent(taro, course, "helper")
+    client.put("/api/monitor", json={"url": "https://example.com/old-style"}, headers=api("helper"))
+    assert [(m.name, m.value) for m in rows(engine, Monitor)] == [("Monitor", "https://example.com/old-style")]
+    assert client.get("/api/agents/me/monitor", headers=api("helper")).json()["monitor"]["kind"] == "link"
+    assert client.post("/api/monitor/file", files={"file": ("a.pdf", b"nope", "application/pdf")},
+                       headers=api("helper")).status_code == 422
+    assert client.delete("/api/monitor", headers=api("helper")).json() == {"deleted": 1}
+
+
+def test_a_legacy_single_monitor_is_moved_into_the_monitor_table(engine, taro, course, create_agent):
+    from db import move_legacy_monitors
+
+    agent_id = create_agent(taro, course, "helper")
+    with Session(engine) as db:
+        agent = db.get(Agent, agent_id)
+        agent.monitor_url, agent.pinned_monitor = "https://example.com/legacy", True
+        db.add(agent)
+        db.commit()
+        move_legacy_monitors(db)
+        move_legacy_monitors(db)  # running it again changes nothing
+        agent = db.get(Agent, agent_id)
+        assert agent.monitor_url is None and agent.pinned_monitor is False
+        assert agent.pinned_monitor_name == "Monitor"
+    assert [(m.name, m.kind, m.value) for m in rows(engine, Monitor)] == [("Monitor", "link", "https://example.com/legacy")]
+
+
+def test_deleting_an_agent_deletes_its_monitors_and_their_files(engine, client, taro, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    client.post("/api/monitors/file", data={"name": "Report"}, files={"file": ("r.pdf", b"%PDF-1.4 r", "application/pdf")},
+                headers=api("helper"))
+    taro.post(f"/agents/{agent_id}/delete", data={"password": PASSWORD})
+    assert rows(engine, Monitor) == [] and rows(engine, StoredFile) == []
 
 
 # --- The connector -------------------------------------------------------------------------
@@ -541,3 +682,31 @@ def test_each_agent_keeps_only_the_newest_outputs_and_activity(engine, client, t
     for number in range(6):
         client.post("/api/events", json={"message": f"line {number}"}, headers=api("chatty"))
     assert [e.message for e in rows(engine, Event)] == ["line 2", "line 3", "line 4", "line 5"]
+
+
+def test_connector_sets_named_monitors_and_buffers_only_the_newest_value_each(engine, taro, connector):
+    agent_id = rows(engine, Agent)[0].id
+    assert connector.set_monitor(3, "Queue") is True
+    assert connector.set_monitor("All good", "Status") is True
+    assert connector.set_monitor(b"%PDF-1.4 daily", "Summary") is True
+    monitors = {m.name: m for m in rows(engine, Monitor)}
+    assert monitors["Queue"].value == "3" and monitors["Summary"].kind == "pdf"
+    # While paused, updates are held, and only each monitor's newest value waits.
+    taro.post(f"/agents/{agent_id}/command", data={"command": "pause"})
+    connector.check_in()
+    connector.set_monitor(4, "Queue")
+    connector.set_monitor(5, "Queue")
+    connector.set_monitor("Busy", "Status")
+    assert connector.pending() == 2
+    taro.post(f"/agents/{agent_id}/command", data={"command": "start"})
+    connector.check_in()
+    assert connector.flush() == 0
+    monitors = {m.name: m.value for m in rows(engine, Monitor)}
+    assert monitors["Queue"] == "5" and monitors["Status"] == "Busy"
+    read = connector.read_monitor("me", "Queue")
+    assert read["content"] == 5
+    assert [m["name"] for m in connector.read_monitors()] == ["Queue", "Status", "Summary"]
+    assert connector.download(connector.read_monitor("me", "Summary")) == b"%PDF-1.4 daily"
+    assert connector.set_monitor(None, "Status") is True  # None removes it
+    assert connector.delete_monitors("Queue") == 1
+    assert [m.name for m in rows(engine, Monitor)] == ["Summary"]

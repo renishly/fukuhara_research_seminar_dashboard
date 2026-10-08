@@ -1,0 +1,53 @@
+{# A feed's list for the Filter's current choices.
+   Outputs show their category and when they were sent; monitors show their
+   name and when they were last updated. A monitor's PDF keeps its viewer
+   (hx-preserve) while other monitors refresh, until the PDF itself is replaced. #}
+{% import "partials/output_macros.html" as show %}
+{% if f.entries %}
+<ul class="divide-y divide-base-content/20">
+  {% for item in f.entries %}
+  <li class="flex flex-col gap-2 py-3" x-data="{ embed: false }">
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      {% if f.section == "outputs" %}
+      <span class="badge badge-outline badge-sm">{{ item.category }}</span>
+      <time class="font-mono">{{ item.created_at | jst(seconds=true) }}</time>
+      {% else %}
+      <strong class="text-sm">{{ item.name }}</strong>
+      <time class="font-mono">updated {{ item.updated_at | jst(seconds=true) }}</time>
+      {% if item.kind == "link" %}
+      <button type="button" class="btn btn-xs" @click="embed = !embed" x-text="embed ? 'Hide' : 'Show here'">Show here</button>
+      {% endif %}
+      {% endif %}
+    </div>
+    {{ show.content(item, f.files.get(item.file_id), f.inline_types) }}
+    {% if f.section == "monitors" and item.kind == "link" %}
+    {# x-if only creates the frame (and loads the site) when "Show here" is on. #}
+    <template x-if="embed">
+      <div class="space-y-1">
+        <iframe src="{{ item.value }}" title="{{ item.name }}" class="h-[28rem] w-full border border-base-content/40 bg-white"
+                loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+        <p class="text-xs text-base-content/70">Blank or refused? That site doesn't allow being shown inside other pages; open the link instead.</p>
+      </div>
+    </template>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% elif not f.total %}
+<div class="py-8 text-center text-base-content/70">
+  {% if f.section == "outputs" %}
+  <p>No outputs yet.</p>
+  <p class="mt-1 text-sm">One-off results the agent sends with <code>output(content, "category")</code> appear here.</p>
+  {% else %}
+  <p>No monitors yet.</p>
+  <p class="mt-1 text-sm">Datapoints the agent keeps up to date with <code>set_monitor(content, "name")</code> appear here; each new value replaces the last.</p>
+  {% endif %}
+</div>
+{% elif not (f.show_all or f.selected) %}
+<div class="py-8 text-center text-base-content/70">
+  <p>{{ f.total }} {{ ("output" if f.section == "outputs" else "monitor") ~ ("s" if f.total != 1 else "") }} available.</p>
+  <p class="mt-1 text-sm">Use <strong>Filter</strong> to choose which {{ f.feed.nouns }} to show.</p>
+</div>
+{% else %}
+<p class="py-8 text-center text-base-content/70">Nothing in the chosen {{ f.feed.nouns }} yet.</p>
+{% endif %}

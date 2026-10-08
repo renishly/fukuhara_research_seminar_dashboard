@@ -9,9 +9,10 @@ What it does:
      switches on) and Inbox files.
   3. Replies to Start, Pause and messages in handle() below: the place where
      a student's real AI logic goes.
-  4. Does a small piece of "work" every 20 seconds: a "ticks" output. Press
-     Pause and the work stops (wait_if_paused); outputs made just before are
-     held until Start.
+  4. Does a small piece of "work" every 20 seconds: a one-off "ticks" output,
+     and a "Ticks done" monitor that is replaced each time (outputs add to a
+     list; monitors are datapoints kept up to date). Press Pause and the work
+     stops (wait_if_paused); updates made just before are held until Start.
   5. Keeps files uploaded to its Inbox in agent/received/.
 
 Before running it: sign in as an enrolled student, open the class's Agents
@@ -50,6 +51,7 @@ from dashboard_connector import (  # noqa: E402
     listen,
     output,
     report,
+    set_monitor,
     start_check_ins,
     wait_if_paused,
 )
@@ -73,8 +75,10 @@ def handle(command: dict) -> None:
         starts += 1
         report("Starting work.", "status")
         output(starts, "starts")
+        set_monitor("Working", "Status")
     elif name == "pause":
         report("Pausing.", "status")  # the connector holds outputs by itself while paused
+        set_monitor("Paused", "Status")  # held too, and sent (as the newest value) on Start
     elif name == "message":
         text = (command.get("payload") or {}).get("text", "")
         report(f"You said: {text}")
@@ -112,12 +116,14 @@ def main() -> None:
     start_check_ins(every=5)
     report("Agent online", "status")
     output("https://github.com/", "links")  # an example link output
+    set_monitor("Working", "Status")  # a monitor: replaced by each new value
 
     tick = 0
     while True:
         wait_if_paused()  # a safe point: while paused, the agent waits here
         tick += 1
-        output(f"Tick {tick}: did a small piece of work", "ticks")
+        output(f"Tick {tick}: did a small piece of work", "ticks")  # one-off: adds to the list
+        set_monitor(tick, "Ticks done")  # a datapoint: replaces the last value
         time.sleep(20)
 
 

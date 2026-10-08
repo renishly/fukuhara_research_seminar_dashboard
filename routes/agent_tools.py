@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlmodel import Session, func, select
+from sqlmodel import Session, delete, func, select
 
-from db import Agent, AgentFolder, Event, Folder, Output, StoredFile, as_utc, utc_now
+from db import Agent, AgentFolder, Event, Folder, Monitor, MonitorNotifySetting, Output, StoredFile, as_utc, utc_now
 from security import MIN_API_KEY_LENGTH, encrypt_api_key, hash_api_key
 from uploads import delete_stored_file
 
@@ -26,7 +26,8 @@ CHECK_IN_SLACK = 30
 MAX_AGENT_NAME = 50
 MAX_DESCRIPTION = 1000
 MAX_FOLDER_NAME = 40
-MAX_CATEGORY = 50
+MAX_CATEGORY = 50  # output categories and monitor names
+MAX_MONITORS_PER_AGENT = 100
 MAX_OUTPUT_TEXT = 20_000
 MAX_URL = 2000
 LINK_PATTERN = re.compile(r"^https?://\S+$")
@@ -151,11 +152,11 @@ def count_outputs(db: Session, agent_id: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def clean_category(raw: str) -> str:
-    """Trim an output category and check it, or raise 422."""
+def clean_category(raw: str, what: str = "category") -> str:
+    """Trim an output category or monitor name and check it, or raise 422."""
     category = " ".join(str(raw).split())
     if not category or len(category) > MAX_CATEGORY:
-        raise HTTPException(422, f"category must be 1 to {MAX_CATEGORY} characters")
+        raise HTTPException(422, f"{what} must be 1 to {MAX_CATEGORY} characters")
     return category
 
 
@@ -230,10 +231,78 @@ def preview(text: str, limit: int = 80) -> str:
     return first if len(first) <= limit else first[: limit - 1] + "…"
 
 
-def monitor_version(agent: Agent) -> str:
-    """Changes whenever the monitor changes; the page uses it to spot updates."""
-    updated = agent.monitor_updated_at
-    return as_utc(updated).strftime("%Y%m%d%H%M%S%f") if updated else "none"
+# ---------------------------------------------------------------------------
+# Monitors: named datapoints that are replaced (outputs are one-off items)
+# ---------------------------------------------------------------------------
+
+
+def monitor_names(db: Session, agent_id: int) -> list[str]:
+    names = db.exec(select(Monitor.name).where(Monitor.agent_id == agent_id)).all()
+    return sorted(names, key=str.lower)
+
+
+def get_monitor(db: Session, agent_id: int, name: str) -> Monitor | None:
+    return db.exec(select(Monitor).where(Monitor.agent_id == agent_id, Monitor.name == name)).first()
+
+
+def remove_monitor(db: Session, agent: Agent, monitor: Monitor, note: str = "") -> None:
+    """Delete one monitor (and its file), unpin it, and log it. The caller commits."""
+    file_id, name = monitor.file_id, monitor.name
+    db.delete(monitor)
+    db.exec(delete(MonitorNotifySetting).where(MonitorNotifySetting.agent_id == agent.id,
+                                               MonitorNotifySetting.name == name))
+    if agent.pinned_monitor_name == name:
+        agent.pinned_monitor_name = None
+        db.add(agent)
+    log_activity(db, agent.id, "monitor", f'Monitor "{name}" removed{note}')
+    db.flush()
+    delete_stored_file(db, file_id)
+
+
+def set_monitor(db: Session, agent: Agent, name: str, kind: str | None, value: str | None,
+                stored: StoredFile | None = None, made_at=None, note: str = "") -> bool:
+    """Replace (or create; or, with kind=None, remove) the agent's monitor `name`. Commits.
+
+    A late update older than that monitor's current value is skipped and
+    returns False, so a late arrival never replaces something newer. Only
+    creating and removing a monitor is noted in Activity: a monitor may be
+    updated every few seconds, and each update simply replaces the last.
+    """
+    when, late = when_made(made_at)
+    existing = get_monitor(db, agent.id, name)
+    if existing is not None and when < as_utc(existing.updated_at):
+        if stored is not None:
+            db.flush()
+            delete_stored_file(db, stored.id)
+        log_activity(db, agent.id, "monitor", f'Older update of monitor "{name}" skipped{LATE_NOTE}', created_at=when)
+        db.commit()
+        return False
+    if kind is None:  # remove it
+        if existing is not None:
+            remove_monitor(db, agent, existing, note)
+        db.commit()
+        return True
+    if existing is None:
+        count = db.exec(select(func.count(Monitor.id)).where(Monitor.agent_id == agent.id)).one()
+        if count >= MAX_MONITORS_PER_AGENT:
+            if stored is not None:
+                db.flush()
+                delete_stored_file(db, stored.id)
+                db.commit()
+            raise HTTPException(422, f"an agent can have at most {MAX_MONITORS_PER_AGENT} monitors; remove some first")
+        existing = Monitor(agent_id=agent.id, name=name, kind=kind, value=value)
+        log_activity(db, agent.id, "monitor", f'New monitor "{name}"{note}' + (LATE_NOTE if late else ""),
+                     created_at=when)
+    old_file = existing.file_id
+    existing.kind, existing.value = kind, value
+    existing.file_id = stored.id if stored else None
+    existing.updated_at = when
+    db.add(existing)
+    db.flush()
+    if old_file and old_file != existing.file_id:
+        delete_stored_file(db, old_file)
+    db.commit()
+    return True
 
 
 def trim_history(db: Session, agent_id: int) -> None:

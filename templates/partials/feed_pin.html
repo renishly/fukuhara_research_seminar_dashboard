@@ -1,0 +1,12 @@
+{# One pin button: pins this output category or monitor to the agent's grid
+   card. An agent has one pin for both feeds, so pinning in one feed sends the
+   other feed's pinned button back unpinned ("out of band", by its id). #}
+{% if is_owner %}
+<button type="button" id="pin-{{ section }}-{{ row.name | pin_key }}" {% if oob %}hx-swap-oob="true"{% endif %}
+        class="btn btn-ghost btn-xs {{ 'btn-active' if row.pinned else 'opacity-40' }}"
+        hx-post="/agents/{{ agent.id }}/{{ section }}/pin" hx-vals='{{ {"name": row.name} | tojson }}'
+        hx-target="#{{ section }}-options" hx-swap="outerHTML" aria-pressed="{{ 'true' if row.pinned else 'false' }}"
+        aria-label="Pin {{ row.name }} to the agent's card" title="{{ 'Pinned to' if row.pinned else 'Pin to' }} this agent's card on the grid">&#128204;</button>
+{% elif row.pinned %}
+<span class="px-1 text-xs" title="Pinned by the owner">&#128204;</span>
+{% endif %}

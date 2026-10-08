@@ -26,6 +26,7 @@ from db import (
     CourseHiddenUser,
     Gen,
     InboxFile,
+    Monitor,
     Output,
     StoredFile,
     Submission,
@@ -206,9 +207,10 @@ def can_download_file(db: Session, viewer: Viewer, stored: StoredFile) -> bool:
         agent = db.get(Agent, output.agent_id)
         return agent is not None and can_view_agent_page(db, viewer, agent)
 
-    monitor_of = db.exec(select(Agent).where(Agent.monitor_file_id == stored.id)).first()
-    if monitor_of is not None:
-        return can_view_agent_page(db, viewer, monitor_of)
+    monitor = db.exec(select(Monitor).where(Monitor.file_id == stored.id)).first()
+    if monitor is not None:
+        agent = db.get(Agent, monitor.agent_id)
+        return agent is not None and can_view_agent_page(db, viewer, agent)
 
     inbox = db.exec(select(InboxFile).where(InboxFile.file_id == stored.id)).first()
     if inbox is not None:

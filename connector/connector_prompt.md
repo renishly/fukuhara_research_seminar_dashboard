@@ -5,7 +5,7 @@ I have an AI agent (the code in this project). My research seminar has a web das
 1. The agent **sends its chosen results ("outputs")** to the dashboard through an `output(content, category)` function, much like `print()`. It keeps them wherever it already does as well.
 2. The agent **reports its status** (online, paused, errors) to the dashboard's activity log.
 3. The agent **receives commands** from the dashboard (Start, Pause, and text messages) and reacts to them.
-4. Optionally, the agent **sets its monitor**. This is either a link to wherever its data lives (such as a Google Sheet or a dashboard), or a PDF the dashboard shows inside the page (such as a daily summary it regenerates on a schedule). Only the latest monitor is shown.
+4. Optionally, the agent **keeps monitors up to date**. A monitor is a named datapoint whose value is *replaced* each time the agent sends it (a count, a status line, a link to where its data lives, the latest daily-summary PDF...). An output, by contrast, is a one-off item that adds to a list.
 5. Optionally, the agent **reads what any agent in the same class has shared** (including itself) and **deletes its own old data**. See "Reading and deleting" below.
 6. Optionally, the agent **takes files I upload to its Inbox** on the dashboard and stores them its own way. See "The Inbox" below.
 
@@ -48,16 +48,16 @@ Read the values from the environment variables `DASHBOARD_URL` and `DASHBOARD_AP
 | `DELETE /api/outputs/{id}` | none | `200` with `{"deleted": 1}`; `403` if it's another agent's |
 | `DELETE /api/outputs` | query: `category` and/or `before`, or `all=true` | `200` with `{"deleted": <count>}`; `422` with none of them |
 | `POST /api/state` | `{"check_in_every": <seconds>, "accepts_messages": true/false, "accepts_inbox": true/false}`; all optional | `200` with `{"paused", "accepts_messages", "accepts_inbox", "inbox_waiting", "check_in_every"}` |
-| `PUT /api/monitor` | `{"url": "https://...", "label": "Results sheet"}`, or `{"url": null}` to remove it | `200` with `{"url", "label", "applied"}` |
-| `POST /api/monitor/file` | multipart form: `file` (a PDF, max 5 MB) and optional `label` | `200` with `{"filename", "label", "applied"}`, `413` if too big, `422` if not a PDF |
-| `DELETE /api/monitor` | none | `200` with `{"deleted": 1 or 0}` |
+| `PUT /api/monitors` | `{"name": "Status", "content": <text, number, link, list or dict>}`; `"content": null` removes that monitor | `200` with `{"name", "applied"}` |
+| `POST /api/monitors/file` | multipart form: `name` (text) and `file` (max 5 MB; a real PDF is shown inside the page) | `200` with `{"name", "filename", "applied"}`, `413` if too big |
+| `DELETE /api/monitors` | query: `name`, or `all=true` | `200` with `{"deleted": <count>}`; `422` with neither |
 | `GET /api/agents` | none | `200` with every agent in this agent's class, A to Z |
 | `GET /api/agents/{agent}` | none | `200` with one agent plus its output `categories` |
 | `GET /api/agents/{agent}/outputs` | query: `category` (repeatable), `after`, `before`, `limit` (1-500, default 50), `offset` | `200` with outputs, newest first |
 | `GET /api/agents/{agent}/outputs/{id}/file` | none | `200` with the file of a file output |
 | `GET /api/agents/{agent}/events` | query: `type`, `after`, `before`, `limit`, `offset` | `200` with activity lines, newest first |
-| `GET /api/agents/{agent}/monitor` | none | `200` with `{"monitor": {...} or null}` |
-| `GET /api/agents/{agent}/monitor.pdf` | none | `200` with the PDF, or `404` if the monitor isn't a PDF |
+| `GET /api/agents/{agent}/monitors` | query: `name` (repeatable) | `200` with its monitors and their current values, A to Z |
+| `GET /api/agents/{agent}/monitors/{id}/file` | none | `200` with the file of a file or PDF monitor |
 | `GET /api/inbox` | none | `200` with this agent's waiting Inbox files, oldest first |
 | `GET /api/inbox/{id}/file` | none | `200` with the file (streamed; up to 50 MB), or `404` if it isn't this agent's |
 | `POST /api/inbox/{id}/received` | none | `200` with `{"deleted": 1}`: "I've stored it", so the dashboard deletes it |
@@ -71,25 +71,24 @@ Read the values from the environment variables `DASHBOARD_URL` and `DASHBOARD_AP
   - lists and dicts as formatted JSON;
   - anything else as text.
 - Files are stored on the dashboard. PNG, JPEG, GIF and WebP images are shown inline; other files are offered as downloads.
-- Text `content` can be up to 20,000 characters, and a monitor `label` up to 50.
+- Text `content` can be up to 20,000 characters. Monitor `name`s, like categories, are 1 to 50 characters; an agent can have up to 100 monitors.
 - `category` is 1 to 50 characters. It sorts outputs into channels the user can filter by. The user can also pin one category, so its latest output shows on the agent's card in the grid.
-- The monitor link must be `http://` or `https://`.
-- `POST /api/events`, `POST /api/outputs`, `POST /api/outputs/file`, `PUT /api/monitor` and `POST /api/monitor/file` also accept an optional `created_at` (an ISO 8601 date and time in UTC, e.g. `2026-10-03T08:00:00Z`). It's sent as a JSON field, or a form field for the file uploads. It's when the item was really made, so items sent late land at their real time. Times in the future are treated as "now", and a late monitor update older than the current monitor is ignored.
-- A wrong or missing key gets `401`. Input the dashboard can't accept (an empty or over-long category, over-long content, a non-PDF monitor file, a bad `created_at`) gets `422`.
-- `applied: false` from a monitor update means it was older than the current monitor and was ignored (this only happens for late updates).
+- `POST /api/events`, `POST /api/outputs`, `POST /api/outputs/file`, `PUT /api/monitors` and `POST /api/monitors/file` also accept an optional `created_at` (an ISO 8601 date and time in UTC, e.g. `2026-10-03T08:00:00Z`). It's sent as a JSON field, or a form field for the file uploads. It's when the item was really made, so items sent late land at their real time. Times in the future are treated as "now", and a late monitor update older than that monitor's current value is ignored.
+- A wrong or missing key gets `401`. Input the dashboard can't accept (an empty or over-long category or monitor name, over-long content, a 101st monitor, a bad `created_at`) gets `422`.
+- `applied: false` from a monitor update means it was older than that monitor's current value and was ignored (this only happens for late updates).
 
 ## Reading and deleting
 
 **Any agent can read the data of every agent in the same class; an agent can only delete its own.** Agents of other classes don't exist as far as the API is concerned (`404`).
 
 - `{agent}` in a path is `me` (this agent), another agent's numeric `id`, or its exact name (URL-encoded). An unknown agent gets `404`. Two students' agents in the class can share a name: then the name gets `409` with `{"detail": {"message", "ids": [...]}}`, and you use an id instead.
-- An agent looks like `{"id", "name", "owner": {"full_name", "gen"}, "description", "you": true for this agent, "folders": [...], "online", "paused", "accepts_messages", "check_in_every", "created_at", "last_seen", "monitor"}`. `GET /api/agents/{agent}` adds `"categories": [{"name", "count", "latest_at"}]`.
+- An agent looks like `{"id", "name", "owner": {"full_name", "gen"}, "description", "you": true for this agent, "folders": [...], "online", "paused", "accepts_messages", "check_in_every", "created_at", "last_seen", "monitors": [their names]}`. `GET /api/agents/{agent}` adds `"categories": [{"name", "count", "latest_at"}]`.
 - An output looks like `{"id", "agent_id", "category", "kind", "content", "created_at"}`.
   - `kind` is `"text"`, `"number"`, `"link"`, `"json"` or `"file"`.
   - `content` is what was sent: text, a number, or a list/dict; for files, the file's name.
   - File outputs also have `"file": {"filename", "content_type", "size", "url"}`; GET the `url` (with the key) for the bytes.
 - An activity line looks like `{"id", "agent_id", "type", "message", "data", "created_at"}`.
-- A monitor is `{"kind": "link", "url", "label", "updated_at"}` or `{"kind": "pdf", "filename", "label", "updated_at", "file_url"}`.
+- A monitor looks like `{"id", "agent_id", "name", "kind", "content", "updated_at"}`, with `kind` as for outputs plus `"pdf"`; file and PDF monitors also have `"file": {"filename", "content_type", "size", "url"}`.
 - `after` and `before` are ISO 8601 times like `2026-10-03T08:00:00Z`.
 - `description` is what the agent does, in the user's words (or `null`). Read other agents' descriptions to understand what they do before using their outputs.
 - Reads never show API keys, Login IDs, Inbox files, nor the Start/Pause/messages sent to an agent.
@@ -134,7 +133,7 @@ The dashboard can be unreachable for a while: no internet, a redeploy, a sleepin
   - While items are waiting, queue new items behind them rather than sending them first.
   - Remove each item (and its copied file) only after the dashboard accepted it.
   - Make sure two retries never run at the same time, so nothing is sent twice.
-- Keep only the newest pending monitor update; older ones are pointless.
+- Keep only the newest pending update **of each monitor** (by name); older values of the same monitor are pointless.
 - Cap the buffer (for example 1,000 items or 100 MB of files), dropping the oldest with a warning.
 - Provide a `flush()` function that tries to send everything now. For agents that run as short scheduled scripts, call it before the script exits; anything still waiting is sent on the next run.
 
@@ -156,18 +155,18 @@ The dashboard can be unreachable for a while: no internet, a redeploy, a sleepin
 
 ## What to build
 
-1. **An `output(content, category)` function, the most important part.** It should feel like `print()`: whatever is passed in is sent to the dashboard's Outputs section under that category.
+1. **An `output(content, category)` function, the most important part.** It should feel like `print()`: whatever is passed in is sent to the dashboard's Outputs section under that category, as a one-off item.
    - `content` can be text, a number, a link, a list/dict, or a file (a path, an open file, or bytes). Files go to `/api/outputs/file`; everything else goes to `/api/outputs` as JSON. Turn anything else into text.
    - Check a file's size before uploading (max 5 MB) and skip it with a warning if it's too big.
    - It must **never raise or crash the agent**. It returns whether the dashboard received it right away; if not, the item goes to the offline buffer (above).
    - **Then use it selectively.** Wrap only the results that matter to me, each with a clear, stable category name (for example `"articles"`, `"reports"`, `"daily summary"`). Don't send raw logs or every intermediate step. Where the agent produces a lot of data, send a short summary (counts, highlights, a link to the full data) rather than everything.
    - Show me which outputs and categories you chose, so I can adjust them.
-2. **A `set_monitor(link_or_pdf, label=None)` helper.**
-   - A web address goes to `PUT /api/monitor`. A PDF (a path, an open file, or bytes) goes to `POST /api/monitor/file`; check it starts with `%PDF-` and is at most 5 MB first. `None` removes the monitor.
-   - Each call replaces the previous monitor, and the dashboard logs it in the activity log.
-   - If the agent already writes its data somewhere I can view (a Google Sheet, a database dashboard, a results page), call it once at startup with that address.
-   - If the agent produces a document on a schedule (a daily summary, a report), call it with the new PDF each time; the dashboard shows it inside the page.
-   - Ask me if you're not sure which to use.
+2. **A `set_monitor(content, name="Monitor")` helper**, for values that change.
+   - Each call **replaces** the value of the monitor called `name`. `content` is as for `output()`: files go to `POST /api/monitors/file` (max 5 MB; a PDF is shown inside the page), everything else to `PUT /api/monitors` as JSON. `None` removes that monitor.
+   - **Outputs vs monitors:** an output is a one-off result that adds to a list ("found a new paper"); a monitor is a datapoint kept up to date ("papers in queue: 12", "status: reading", the current daily-summary PDF, a link to the live results sheet). Choose the one that fits each piece of data.
+   - Hold monitor updates while paused and buffer them offline like outputs, keeping only each monitor's newest value.
+   - Also provide `read_monitors(agent="me", names=None)`, `read_monitor(agent="me", name="Monitor")` and `delete_monitors(name=None, everything=False)` if the agent has a use for them.
+   - Show me which monitors you chose, and ask me if you're not sure whether something should be an output or a monitor.
 3. **A `report(message, type="log", data=None)` helper** that sends an event (status lines for the activity log).
    - It must **never raise or crash the agent**: catch network errors and print a one-line warning with a helpful hint (`401`: check the key; `404`: check the address; timeout: the site may be waking up).
 4. **Command handling at each check-in.**
@@ -186,12 +185,12 @@ The dashboard can be unreachable for a while: no internet, a redeploy, a sleepin
    - errors, as `"error"` events;
    - occasional progress, as `"log"` events.
 
-   Results belong in `output()`, not here. The dashboard already adds a timestamped activity line for every output and monitor update, so don't report those separately.
+   Results belong in `output()`, not here. The dashboard already adds a timestamped activity line for every output and for each monitor created or removed, so don't report those separately.
 
    Keep messages short (one line) and don't send more than about one event per second.
 
 7. **Reading and deleting helpers**, only if this agent has a use for them (ask me):
-   - `agents()`, `read_agent(agent="me")`, `read_outputs(agent="me", category=None, after=None, before=None, limit=50, offset=0)`, `read_activity(agent="me", kind=None, after=None, before=None, limit=50, offset=0)`, `read_monitor(agent="me")` and `download(item, save_to=None)` (the bytes of a file output or a PDF monitor);
+   - `agents()`, `read_agent(agent="me")`, `read_outputs(agent="me", category=None, after=None, before=None, limit=50, offset=0)`, `read_activity(agent="me", kind=None, after=None, before=None, limit=50, offset=0)`, `read_monitors(agent="me", names=None)`, `read_monitor(agent="me", name="Monitor")` and `download(item, save_to=None)` (the bytes of a file output or a file/PDF monitor);
    - `delete_output(item)`, `delete_outputs(category=None, before=None, everything=False)`, `delete_event(item)` and `delete_activity(kind=None, before=None, everything=False)`. Refuse to delete without a filter unless `everything=True`.
    - Like the rest, they must never raise: on failure, print a one-line warning (use the dashboard's `detail` message for `403`, `404` and `422`) and return nothing / `False`.
 

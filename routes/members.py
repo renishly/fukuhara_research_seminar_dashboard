@@ -12,6 +12,7 @@ from db import (
     Folder,
     Gen,
     LoginSession,
+    MonitorNotifySetting,
     NotifySetting,
     StoredFile,
     Submission,
@@ -161,6 +162,7 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
     for agent in db.exec(select(Agent).where(Agent.owner_id == user.id)).all():
         delete_agent(db, agent)
     for model, column in ((Folder, Folder.owner_id), (NotifySetting, NotifySetting.user_id),
+                          (MonitorNotifySetting, MonitorNotifySetting.user_id),
                           (LoginSession, LoginSession.user_id), (ClassVisit, ClassVisit.user_id),
                           (CourseEnrolledUser, CourseEnrolledUser.user_id),
                           (CourseHiddenUser, CourseHiddenUser.user_id)):

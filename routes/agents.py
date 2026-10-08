@@ -22,16 +22,18 @@ from db import (
     Event,
     Folder,
     InboxFile,
+    Monitor,
+    MonitorNotifySetting,
     NotifySetting,
     Output,
     StoredFile,
     User,
     get_session,
-    utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
 from routes.agent_tools import (
     MAX_AGENT_NAME,
+    MAX_CATEGORY,
     MAX_DESCRIPTION,
     MAX_FOLDER_NAME,
     agent_name_taken,
@@ -42,12 +44,14 @@ from routes.agent_tools import (
     count_outputs,
     file_details,
     folders_of,
+    get_monitor,
     is_online,
     latest_event,
     latest_output,
     log_activity,
-    monitor_version,
+    monitor_names,
     output_categories,
+    set_monitor,
     store_api_key,
 )
 from routes.common import delete_agent, get_course, not_found, student_label
@@ -91,7 +95,6 @@ router = APIRouter()
 CELLS_PER_PAGE = 9  # a 3 x 3 grid (agent cards plus, for the owner, the "Add Agent" card)
 OUTPUTS_SHOWN = 50
 MAX_INBOX_NOTE = 1000
-OUTPUT_SORTS = {"date": "Date", "category": "Category name", "content": "Content"}
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +190,13 @@ def grid_context(db: Session, viewer: Viewer, course: Course, owner: User, page:
         if viewer.is_member:  # guests only see names, status and descriptions
             cell["latest"] = latest_event(db, agent.id)
             cell["folders"] = folders_of(db, agent.id)
-            cell["pinned"] = latest_output(db, agent.id, agent.pinned_category) if agent.pinned_category else None
+            # The pinned item: the newest output of the pinned category, or the pinned monitor.
+            if agent.pinned_category:
+                cell["pinned"] = latest_output(db, agent.id, agent.pinned_category)
+                cell["pinned_label"] = agent.pinned_category
+            elif agent.pinned_monitor_name:
+                cell["pinned"] = get_monitor(db, agent.id, agent.pinned_monitor_name)
+                cell["pinned_label"] = agent.pinned_monitor_name
         cells.append(cell)
     pinned_files = file_details(db, [c["pinned"].file_id for c in cells if c.get("pinned") and c["pinned"].file_id])
     return {
@@ -388,44 +397,83 @@ def header_context(db: Session, viewer: Viewer, agent: Agent, settings_open: boo
             "description_error": errors.get("description_error")}
 
 
-def outputs_context(db: Session, viewer: Viewer, agent: Agent, selected: list[str] | None = None,
-                    show_all: bool = False, sort: str = "date", order: str = "desc") -> dict:
-    """The Outputs section and its Filter panel, for this viewer's choices.
+# Outputs and Monitors work the same way on an agent's page (the "feeds"):
+# a Filter panel to choose which categories/monitors to show, sorting, a bell
+# per name (notify me) and one pin per agent (shown on its grid card).
+#   - outputs:  one-off items that add to a list, grouped by category;
+#   - monitors: named datapoints, each replaced by the agent's next value.
+FEEDS = {
+    "outputs": {"model": Output, "name": Output.category, "time": Output.created_at, "noun": "category",
+                "nouns": "categories", "title": "Outputs", "sorts": {"date": "Date", "name": "Category name",
+                                                                       "content": "Content"}},
+    "monitors": {"model": Monitor, "name": Monitor.name, "time": Monitor.updated_at, "noun": "monitor",
+                 "nouns": "monitors", "title": "Monitors", "sorts": {"date": "Last updated", "name": "Name",
+                                                                     "content": "Content"}},
+}
 
-    selected=None means a first visit: nothing is ticked, except a pinned
-    category, which starts ticked.
+
+def feed_names(db: Session, agent: Agent, section: str) -> list[str]:
+    return output_categories(db, agent.id) if section == "outputs" else monitor_names(db, agent.id)
+
+
+def pinned_name(agent: Agent, section: str) -> str | None:
+    return agent.pinned_category if section == "outputs" else agent.pinned_monitor_name
+
+
+def notifying_names(db: Session, viewer: Viewer, agent: Agent, section: str) -> set[str]:
+    if section == "outputs":
+        column, model = NotifySetting.category, NotifySetting
+    else:
+        column, model = MonitorNotifySetting.name, MonitorNotifySetting
+    return set(db.exec(select(column).where(model.agent_id == agent.id, model.user_id == viewer.id)).all())
+
+
+def feed_context(db: Session, viewer: Viewer, agent: Agent, section: str, selected: list[str] | None = None,
+                 show_all: bool = False, sort: str = "date", order: str = "desc") -> dict:
+    """A feed (Outputs or Monitors) and its Filter panel, for this viewer's choices.
+
+    selected=None means a first visit: nothing is ticked, except the pinned
+    name, which starts ticked. Each visit starts fresh.
     """
-    names = output_categories(db, agent.id)
-    notifying = set(db.exec(select(NotifySetting.category).where(
-        NotifySetting.agent_id == agent.id, NotifySetting.user_id == viewer.id)).all())
-    categories = [{"name": n, "notify": n in notifying, "pinned": n == agent.pinned_category} for n in names]
+    feed = FEEDS[section]
+    model = feed["model"]
+    names = feed_names(db, agent, section)
+    notifying = notifying_names(db, viewer, agent, section)
+    pinned = pinned_name(agent, section)
+    rows = [{"name": n, "notify": n in notifying, "pinned": n == pinned} for n in names]
     if selected is None:
-        selected = [agent.pinned_category] if agent.pinned_category else []
+        selected = [pinned] if pinned else []
     selected = [name for name in dict.fromkeys(selected) if name in names]
-    sort = sort if sort in OUTPUT_SORTS else "date"
+    sort = sort if sort in feed["sorts"] else "date"
     order = "asc" if order == "asc" else "desc"
-    outputs = []
+    items = []
     if show_all or selected:
-        statement = select(Output).where(Output.agent_id == agent.id)
+        statement = select(model).where(model.agent_id == agent.id)
         if not show_all:
-            statement = statement.where(Output.category.in_(selected))
-        columns = {"date": [Output.created_at, Output.id],
-                   "category": [func.lower(Output.category), Output.category],
-                   "content": [func.lower(Output.value), Output.value]}[sort]
+            statement = statement.where(feed["name"].in_(selected))
+        columns = {"date": [feed["time"], model.id],
+                   "name": [func.lower(feed["name"]), feed["name"]],
+                   "content": [func.lower(model.value), model.value]}[sort]
         ordering = [c.asc() if order == "asc" else c.desc() for c in columns]
         if sort != "date":
-            ordering += [Output.created_at.desc(), Output.id.desc()]
-        outputs = db.exec(statement.order_by(*ordering).limit(OUTPUTS_SHOWN)).all()
+            ordering += [feed["time"].desc(), model.id.desc()]
+        items = db.exec(statement.order_by(*ordering).limit(OUTPUTS_SHOWN)).all()
     if show_all:
         summary = "All"
     elif selected:
-        summary = selected[0] if len(selected) == 1 else f"{len(selected)} categories"
+        summary = selected[0] if len(selected) == 1 else f"{len(selected)} {feed['nouns']}"
     else:
         summary = "Choose..."
-    return {"agent": agent, "categories": categories, "selected": selected, "show_all": show_all,
-            "sort": sort, "order": order, "sorts": OUTPUT_SORTS, "summary": summary, "outputs": outputs,
-            "files": file_details(db, [o.file_id for o in outputs if o.file_id]), "inline_types": INLINE_TYPES,
-            "total": count_outputs(db, agent.id), "is_owner": owns_agent(viewer, agent)}
+    total = (count_outputs(db, agent.id) if section == "outputs" else len(names))
+    return {"agent": agent, "section": section, "feed": feed, "names": rows, "selected": selected,
+            "show_all": show_all, "sort": sort, "order": order, "summary": summary, "entries": items,
+            "files": file_details(db, [i.file_id for i in items if i.file_id]), "inline_types": INLINE_TYPES,
+            "total": total, "is_owner": owns_agent(viewer, agent)}
+
+
+def both_feeds(db: Session, viewer: Viewer, agent: Agent) -> dict:
+    return {"outputs_feed": feed_context(db, viewer, agent, "outputs"),
+            "monitors_feed": feed_context(db, viewer, agent, "monitors")}
 
 
 def inbox_context(db: Session, agent: Agent, error: str | None = None, notice: str | None = None) -> dict:
@@ -439,148 +487,145 @@ def inbox_context(db: Session, agent: Agent, error: str | None = None, notice: s
 @router.get("/agents/{agent_id}")
 def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current_viewer),
                db: Session = Depends(get_session)):
-    """One agent's page: Monitor, Outputs, Activity, and (for its owner) Controls."""
+    """One agent's page: Monitors, Outputs, Activity, and (for its owner) Controls."""
     if viewer.is_guest:
         raise forbidden("Guests can see the agent grid, but not agent pages.")
     agent = viewable_agent(db, viewer, agent_id)
-    context = header_context(db, viewer, agent) | outputs_context(db, viewer, agent)
+    context = header_context(db, viewer, agent) | both_feeds(db, viewer, agent)
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}
     course = db.get(Course, agent.course_id)
-    return render(request, db, viewer, "agent_page.html", course=course, version=monitor_version(agent),
+    return render(request, db, viewer, "agent_page.html", course=course,
                   back_url=grid_url(agent, page=page_of(db, agent)), **context)
 
 
-@router.get("/agents/{agent_id}/outputs")
-def agent_outputs(
-    agent_id: int,
-    c: list[str] = Query([]),
-    show_all: bool = Query(False, alias="all"),
-    sort: str = "date",
-    order: str = "desc",
-    known: list[str] = Query([]),
-    seen: str | None = None,
-    viewer: Viewer = Depends(require_member),
-    db: Session = Depends(get_session),
-):
-    """The output list for the Filter's current choices (also every 3 seconds).
+def feed_list(db: Session, viewer: Viewer, agent_id: int, section: str, c: list[str], show_all: bool,
+              sort: str, order: str, known: list[str], seen: str | None):
+    """A feed's list for the Filter's current choices (also re-asked every few seconds).
 
     Only the list is replaced, so an open Filter panel isn't disturbed. The
-    panel's category rows are only re-sent (out of band) when categories
-    were added or removed: `known` lists the ones the panel shows now.
+    panel's rows are only re-sent (out of band) when names were added or
+    removed: `known` lists the ones the panel shows now.
     """
     agent = viewable_agent(db, viewer, agent_id)
-    context = outputs_context(db, viewer, agent, c, show_all, sort, order)
-    parts = [render_text(db, viewer, "partials/outputs_list.html", **context),
-             render_text(db, viewer, "partials/outputs_summary.html", oob=True, **context)]
-    if sorted(known) != sorted(cat["name"] for cat in context["categories"]):
-        parts.append(render_text(db, viewer, "partials/outputs_options.html", oob=True, **context))
-    return poll_reply("".join(parts), seen, "outputs-seen")
+    context = feed_context(db, viewer, agent, section, c, show_all, sort, order)
+    parts = [render_text(db, viewer, "partials/feed_list.html", f=context),
+             render_text(db, viewer, "partials/feed_summary.html", f=context, oob=True)]
+    if sorted(known) != sorted(row["name"] for row in context["names"]):
+        parts.append(render_text(db, viewer, "partials/feed_options.html", f=context, oob=True))
+    return poll_reply("".join(parts), seen, f"{section}-seen")
+
+
+@router.get("/agents/{agent_id}/outputs")
+def agent_outputs(agent_id: int, c: list[str] = Query([]), show_all: bool = Query(False, alias="all"),
+                  sort: str = "date", order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
+                  viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
+    return feed_list(db, viewer, agent_id, "outputs", c, show_all, sort, order, known, seen)
+
+
+@router.get("/agents/{agent_id}/monitors")
+def agent_monitors(agent_id: int, c: list[str] = Query([]), show_all: bool = Query(False, alias="all"),
+                   sort: str = "date", order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
+                   viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
+    return feed_list(db, viewer, agent_id, "monitors", c, show_all, sort, order, known, seen)
+
+
+def toggle_pin(db: Session, viewer: Viewer, agent_id: int, section: str, name: str, c: list[str], show_all: bool):
+    """Pin an output category or a monitor to the agent's grid card, or unpin it.
+
+    An agent has one pin, shared by both feeds: pinning here unpins whatever
+    was pinned in the other feed, whose pin button is sent back too (out of band).
+    """
+    agent = own_agent(db, viewer, agent_id)
+    other = "monitors" if section == "outputs" else "outputs"
+    other_pinned = pinned_name(agent, other)
+    now_pinned = None if pinned_name(agent, section) == name else name
+    agent.pinned_category = now_pinned if section == "outputs" else None
+    agent.pinned_monitor_name = now_pinned if section == "monitors" else None
+    db.add(agent)
+    db.commit()
+    reply = render_text(db, viewer, "partials/feed_options.html", f=feed_context(db, viewer, agent, section, c, show_all))
+    if other_pinned and now_pinned:
+        reply += render_text(db, viewer, "partials/feed_pin.html", agent=agent, section=other, is_owner=True,
+                             row={"name": other_pinned, "pinned": False}, oob=True)
+    return HTMLResponse(reply)
 
 
 @router.post("/agents/{agent_id}/outputs/pin")
-def toggle_pin(agent_id: int, category: str = Form(...), c: list[str] = Form([]),
-               show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
-               db: Session = Depends(get_session)):
-    """Pin a category to the agent's grid card (one pin per agent, shared with the Monitor)."""
-    agent = own_agent(db, viewer, agent_id)
-    agent.pinned_category = None if agent.pinned_category == category else category
-    if agent.pinned_category:
-        agent.pinned_monitor = False
-    db.add(agent)
+def pin_output_category(agent_id: int, name: str = Form(...), c: list[str] = Form([]),
+                        show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
+                        db: Session = Depends(get_session)):
+    return toggle_pin(db, viewer, agent_id, "outputs", name, c, show_all)
+
+
+@router.post("/agents/{agent_id}/monitors/pin")
+def pin_monitor(agent_id: int, name: str = Form(...), c: list[str] = Form([]),
+                show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
+                db: Session = Depends(get_session)):
+    return toggle_pin(db, viewer, agent_id, "monitors", name, c, show_all)
+
+
+def toggle_notify(db: Session, viewer: Viewer, agent_id: int, section: str, name: str, c: list[str],
+                  show_all: bool):
+    """The bell: "notify me" about a category or monitor. Stored per viewer; a
+    future Discord bot will send the notifications (nothing is sent yet)."""
+    agent = viewable_agent(db, viewer, agent_id)
+    if section == "outputs":
+        existing = db.get(NotifySetting, (viewer.id, agent.id, name))
+        new = NotifySetting(user_id=viewer.id, agent_id=agent.id, category=name)
+    else:
+        existing = db.get(MonitorNotifySetting, (viewer.id, agent.id, name))
+        new = MonitorNotifySetting(user_id=viewer.id, agent_id=agent.id, name=name)
+    db.delete(existing) if existing else db.add(new)
     db.commit()
-    context = outputs_context(db, viewer, agent, c, show_all)
-    return HTMLResponse(render_text(db, viewer, "partials/outputs_options.html", **context)
-                        + render_text(db, viewer, "partials/monitor_pin.html", agent=agent, oob=True,
-                                      is_owner=True))
+    context = feed_context(db, viewer, agent, section, c, show_all)
+    return HTMLResponse(render_text(db, viewer, "partials/feed_options.html", f=context))
 
 
 @router.post("/agents/{agent_id}/outputs/notify")
-def toggle_notify(agent_id: int, category: str = Form(...), c: list[str] = Form([]),
-                  show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
-                  db: Session = Depends(get_session)):
-    """The bell: "notify me" about a category. Stored per viewer; a future
-    Discord bot will send the notifications (nothing is sent yet)."""
+def notify_output_category(agent_id: int, name: str = Form(...), c: list[str] = Form([]),
+                           show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
+                           db: Session = Depends(get_session)):
+    return toggle_notify(db, viewer, agent_id, "outputs", name, c, show_all)
+
+
+@router.post("/agents/{agent_id}/monitors/notify")
+def notify_monitor(agent_id: int, name: str = Form(...), c: list[str] = Form([]),
+                   show_all: bool = Form(False, alias="all"), viewer: Viewer = Depends(checked_member),
+                   db: Session = Depends(get_session)):
+    return toggle_notify(db, viewer, agent_id, "monitors", name, c, show_all)
+
+
+@router.get("/agents/{agent_id}/monitors/{monitor_id}/view")
+def view_monitor_pdf(agent_id: int, monitor_id: int, viewer: Viewer = Depends(require_member),
+                     db: Session = Depends(get_session)):
+    """A monitor's PDF, shown inside the page by the browser's own PDF viewer.
+    (The one file type from agents shown inline besides images: the API only
+    marks real PDFs as "pdf".)"""
     agent = viewable_agent(db, viewer, agent_id)
-    existing = db.get(NotifySetting, (viewer.id, agent.id, category))
-    if existing:
-        db.delete(existing)
-    else:
-        db.add(NotifySetting(user_id=viewer.id, agent_id=agent.id, category=category))
-    db.commit()
-    context = outputs_context(db, viewer, agent, c, show_all)
-    return HTMLResponse(render_text(db, viewer, "partials/outputs_options.html", **context))
+    monitor = db.get(Monitor, monitor_id)
+    stored = db.get(StoredFile, monitor.file_id) if monitor and monitor.file_id else None
+    if monitor is None or monitor.agent_id != agent.id or monitor.kind != "pdf" or stored is None:
+        raise not_found("No such monitor PDF")
+    return file_response(stored, inline=True, filename=stored.filename, media_type="application/pdf")
 
 
-# --- Monitor -----------------------------------------------------------------
-
-
-def replace_monitor_by_owner(db: Session, agent: Agent, url: str | None, label: str) -> None:
-    """Set or clear the monitor link from Agent settings (a replaced PDF is deleted)."""
-    old_file = agent.monitor_file_id
-    agent.monitor_url, agent.monitor_file_id, agent.monitor_filename = url, None, None
-    agent.monitor_label = " ".join(label.split())[:MAX_AGENT_NAME] or None
-    agent.monitor_updated_at = utc_now()
-    db.add(agent)
-    log_activity(db, agent.id, "monitor",
-                 (f"Monitor link set: {url}" if url else "Monitor removed") + " (from the dashboard)")
-    db.flush()
-    delete_stored_file(db, old_file)
-    db.commit()
-    db.refresh(agent)
-
-
-@router.post("/agents/{agent_id}/monitor")
-def set_monitor_link(request: Request, agent_id: int, url: str = Form(""), label: str = Form(""),
+@router.post("/agents/{agent_id}/monitors/link")
+def set_monitor_link(agent_id: int, name: str = Form(""), url: str = Form(""),
                      viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
+    """Agent settings: set a link monitor by name (or remove a monitor: leave the link empty)."""
     agent = own_agent(db, viewer, agent_id)
+    name = " ".join(name.split())
     error = None
-    if not url.strip():
-        replace_monitor_by_owner(db, agent, None, label)
+    if not name or len(name) > MAX_CATEGORY:
+        error = f"Give the monitor a name of 1 to {MAX_CATEGORY} characters."
+    elif not url.strip():
+        set_monitor(db, agent, name, None, None, note=" (from the dashboard)")
     elif clean_link(url) is None:
         error = "The monitor link must start with http:// or https://."
     else:
-        replace_monitor_by_owner(db, agent, clean_link(url), label)
-    header = render_text(db, viewer, "partials/agent_header.html",
-                         **header_context(db, viewer, agent, settings_open=True, monitor_error=error))
-    monitor = render_text(db, viewer, "partials/monitor.html", agent=agent, oob=True,
-                          version=monitor_version(agent), is_owner=True)
-    return HTMLResponse(header + monitor)
-
-
-@router.get("/agents/{agent_id}/monitor")
-def agent_monitor(agent_id: int, version: str | None = None, viewer: Viewer = Depends(require_member),
-                  db: Session = Depends(get_session)):
-    """The Monitor section, only if it changed since `version` (checked every
-    10 seconds; 204 otherwise, so a PDF being read isn't reloaded)."""
-    agent = viewable_agent(db, viewer, agent_id)
-    if version == monitor_version(agent):
-        return Response(status_code=204)
-    return HTMLResponse(render_text(db, viewer, "partials/monitor.html", agent=agent, oob=False,
-                                    version=monitor_version(agent), is_owner=owns_agent(viewer, agent)))
-
-
-@router.get("/agents/{agent_id}/monitor.pdf")
-def agent_monitor_pdf(agent_id: int, viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
-    """The agent's monitor PDF, shown inside the page by the browser's PDF viewer.
-    (The one file type from members shown inline: the API only accepts real PDFs here.)"""
-    agent = viewable_agent(db, viewer, agent_id)
-    stored = db.get(StoredFile, agent.monitor_file_id) if agent.monitor_file_id else None
-    if stored is None:
-        raise not_found("No monitor PDF")
-    return file_response(stored, inline=True, filename=agent.monitor_filename or "monitor.pdf",
-                         media_type="application/pdf")
-
-
-@router.post("/agents/{agent_id}/monitor/pin")
-def toggle_monitor_pin(agent_id: int, viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
-    agent = own_agent(db, viewer, agent_id)
-    agent.pinned_monitor = not agent.pinned_monitor
-    if agent.pinned_monitor:
-        agent.pinned_category = None  # only one thing can be pinned
-    db.add(agent)
-    db.commit()
-    return HTMLResponse(render_text(db, viewer, "partials/monitor_pin.html", agent=agent, oob=False, is_owner=True))
+        set_monitor(db, agent, name, "link", clean_link(url), note=" (from the dashboard)")
+    return header_reply(db, viewer, agent, monitor_error=error)
 
 
 # --- Activity, controls, messages ------------------------------------------------

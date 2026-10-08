@@ -17,10 +17,22 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, Field
 from sqlmodel import Session, func, select
 
-from db import Agent, Command, Event, Gen, InboxFile, Output, StoredFile, User, as_utc, get_session
+from db import (
+    LEGACY_MONITOR_NAME,
+    Agent,
+    Command,
+    Event,
+    Gen,
+    InboxFile,
+    Monitor,
+    Output,
+    StoredFile,
+    User,
+    as_utc,
+    get_session,
+)
 from routes.agent_tools import (
     LATE_NOTE,
-    MAX_AGENT_NAME,
     MAX_CHECK_IN,
     MIN_CHECK_IN,
     check_in_interval,
@@ -33,6 +45,8 @@ from routes.agent_tools import (
     log_activity,
     parse_time,
     preview,
+    remove_monitor,
+    set_monitor,
     trim_history,
     when_made,
 )
@@ -57,7 +71,7 @@ def refuse_upload(refusal: UploadRefused) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
-# Reporting: events, outputs, the monitor
+# Reporting: events, outputs, monitors
 # ---------------------------------------------------------------------------
 
 
@@ -162,88 +176,115 @@ def agent_state(state_in: StateIn, agent: Agent = Depends(require_agent), db: Se
             "check_in_every": check_in_interval(agent)}
 
 
-def replace_monitor(db: Session, agent: Agent, *, url: str | None = None, stored: StoredFile | None = None,
-                    filename: str | None = None, label: str | None = None, made_at=None) -> bool:
-    """Make a link, a PDF, or nothing the agent's monitor, and log it. Commits.
+# --- Monitors: named datapoints, each replaced by the next value ----------------
+#
+# An output is a one-off item that adds to the agent's Outputs list. A monitor
+# is a datapoint that is *replaced*: set_monitor(content, name) overwrites the
+# monitor called `name` (a temperature, "today's summary" PDF, a status...).
 
-    A late update older than the current monitor is skipped (returns False),
-    so a late arrival never replaces something newer. A replaced PDF is deleted.
-    """
-    when, late = when_made(made_at)
-    if agent.monitor_updated_at and when < as_utc(agent.monitor_updated_at):
-        if stored is not None:
-            db.flush()
-            delete_stored_file(db, stored.id)
-        log_activity(db, agent.id, "monitor", "Older monitor update skipped" + LATE_NOTE, created_at=when)
-        db.commit()
-        return False
-    old_file = agent.monitor_file_id
-    agent.monitor_url = url
-    agent.monitor_file_id = stored.id if stored else None
-    agent.monitor_filename = filename if stored else None
-    agent.monitor_label = " ".join((label or "").split())[:MAX_AGENT_NAME] or None
-    agent.monitor_updated_at = when
-    db.add(agent)
-    if stored is not None:
-        message = f"Monitor updated: PDF {filename}"
-    elif url is not None:
-        message = f"Monitor link set: {url}"
-    else:
-        message = "Monitor removed"
-    log_activity(db, agent.id, "monitor", message + (LATE_NOTE if late else ""), created_at=when)
-    trim_history(db, agent.id)
-    db.flush()
-    if old_file and old_file != agent.monitor_file_id:
-        delete_stored_file(db, old_file)
-    db.commit()
-    db.refresh(agent)
-    return True
+
+def is_pdf(upload: UploadFile) -> bool:
+    """Every real PDF starts with "%PDF-", so nothing else can be shown inside
+    the page pretending to be one."""
+    is_real_pdf = upload.file.read(5).startswith(b"%PDF-")
+    upload.file.seek(0)
+    return is_real_pdf
 
 
 class MonitorIn(BaseModel):
-    url: str | None  # null removes the monitor
-    label: str | None = None
-    created_at: datetime | None = None
+    name: str
+    content: Any = None  # text, a number, a link or a list/dict; null removes the monitor
+    created_at: datetime | None = None  # when the agent made this value, if sent late
 
 
-@router.put("/monitor")
-def set_monitor(monitor_in: MonitorIn, agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
-    """set_monitor(link): a link to where the agent's data lives (or null to remove it)."""
-    if monitor_in.url is None or not monitor_in.url.strip():
-        applied = replace_monitor(db, agent, made_at=monitor_in.created_at)
+@router.put("/monitors")
+def put_monitor(monitor_in: MonitorIn, agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
+    """set_monitor(content, name): replace the monitor called `name` (or create it).
+    Content null removes it."""
+    name = clean_category(monitor_in.name, "name")
+    if monitor_in.content is None:
+        applied = set_monitor(db, agent, name, None, None, made_at=monitor_in.created_at)
     else:
-        url = clean_link(monitor_in.url)
-        if url is None:
-            raise HTTPException(422, "url must start with http:// or https://")
-        applied = replace_monitor(db, agent, url=url, label=monitor_in.label, made_at=monitor_in.created_at)
-    return {"url": agent.monitor_url, "label": agent.monitor_label, "applied": applied}
+        kind, value = describe_content(monitor_in.content)
+        applied = set_monitor(db, agent, name, kind, value, made_at=monitor_in.created_at)
+    trim_history(db, agent.id)
+    db.commit()
+    return {"name": name, "applied": applied}
 
 
-@router.post("/monitor/file")
-def set_monitor_pdf(file: UploadFile = File(...), label: str | None = Form(None), created_at: str | None = Form(None),
-                    agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
-    """set_monitor(pdf): a PDF (up to 5 MB) shown inside the agent's page."""
-    # Every real PDF starts with "%PDF-", so nothing else can ever be shown
-    # inside the page pretending to be one.
-    if not file.file.read(5).startswith(b"%PDF-"):
-        raise HTTPException(422, "monitor files must be PDFs")
-    file.file.seek(0)
+@router.post("/monitors/file")
+def put_monitor_file(name: str = Form(...), file: UploadFile = File(...), created_at: str | None = Form(None),
+                     agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
+    """set_monitor(file, name): a file (up to 5 MB) as the monitor's value. A PDF
+    is shown inside the agent's page; images too; other files are downloads."""
+    name = clean_category(name, "name")
+    pdf = is_pdf(file)
     try:
         stored = save_upload(db, file, AGENT_FILE_LIMIT, agent.owner_id)
     except UploadRefused as refusal:
         raise refuse_upload(refusal)
-    stored.content_type = "application/pdf"
-    applied = replace_monitor(db, agent, stored=stored, filename=stored.filename, label=label, made_at=created_at)
-    return {"filename": stored.filename, "label": agent.monitor_label, "applied": applied}
+    if pdf:
+        stored.content_type = "application/pdf"
+    applied = set_monitor(db, agent, name, "pdf" if pdf else "file", stored.filename, stored=stored, made_at=created_at)
+    return {"name": name, "filename": stored.filename, "applied": applied}
 
 
-@router.delete("/monitor")
-def delete_monitor(agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
-    """Remove the caller's own Monitor."""
-    had_monitor = bool(agent.monitor_url or agent.monitor_file_id)
-    if had_monitor:
-        replace_monitor(db, agent)
-    return {"deleted": 1 if had_monitor else 0}
+@router.delete("/monitors")
+def delete_monitors(name: str | None = None, all: bool = False, agent: Agent = Depends(require_agent),
+                    db: Session = Depends(get_session)):
+    """Remove one of the caller's own monitors (?name=), or all of them (?all=true)."""
+    if name is None and not all:
+        raise HTTPException(422, "say what to delete: name, or all=true")
+    statement = select(Monitor).where(Monitor.agent_id == agent.id)
+    if name is not None:
+        statement = statement.where(Monitor.name == " ".join(name.split()))
+    monitors = list(db.exec(statement).all())
+    for monitor in monitors:
+        remove_monitor(db, agent, monitor)
+    if monitors:
+        count = len(monitors)
+        log_activity(db, agent.id, "delete", f"Deleted {count} monitor{'s' if count != 1 else ''}")
+    db.commit()
+    return {"deleted": len(monitors)}
+
+
+# The single, unnamed monitor of the earlier version. Kept so connectors
+# downloaded before monitors had names keep working: they set the monitor
+# called "Monitor".
+
+
+class OldMonitorIn(BaseModel):
+    url: str | None
+    label: str | None = None
+    created_at: datetime | None = None
+
+
+@router.put("/monitor", include_in_schema=False)
+def put_old_monitor(monitor_in: OldMonitorIn, agent: Agent = Depends(require_agent),
+                    db: Session = Depends(get_session)):
+    if monitor_in.url is None or not monitor_in.url.strip():
+        applied = set_monitor(db, agent, LEGACY_MONITOR_NAME, None, None, made_at=monitor_in.created_at)
+    else:
+        url = clean_link(monitor_in.url)
+        if url is None:
+            raise HTTPException(422, "url must start with http:// or https://")
+        applied = set_monitor(db, agent, LEGACY_MONITOR_NAME, "link", url, made_at=monitor_in.created_at)
+    return {"url": monitor_in.url, "label": monitor_in.label, "applied": applied}
+
+
+@router.post("/monitor/file", include_in_schema=False)
+def put_old_monitor_pdf(file: UploadFile = File(...), label: str | None = Form(None),
+                        created_at: str | None = Form(None), agent: Agent = Depends(require_agent),
+                        db: Session = Depends(get_session)):
+    if not is_pdf(file):
+        raise HTTPException(422, "monitor files must be PDFs")
+    reply = put_monitor_file(LEGACY_MONITOR_NAME, file, created_at, agent, db)
+    return {"filename": reply["filename"], "label": label, "applied": reply["applied"]}
+
+
+@router.delete("/monitor", include_in_schema=False)
+def delete_old_monitor(agent: Agent = Depends(require_agent), db: Session = Depends(get_session)):
+    return delete_monitors(LEGACY_MONITOR_NAME, False, agent, db)
 
 
 # ---------------------------------------------------------------------------
@@ -354,14 +395,19 @@ def find_agent(db: Session, caller: Agent, ref: str) -> Agent:
     return matches[0]
 
 
-def monitor_info(agent: Agent) -> dict | None:
-    common = {"label": agent.monitor_label, "updated_at": iso(agent.monitor_updated_at)}
-    if agent.monitor_file_id:
-        return {"kind": "pdf", "filename": agent.monitor_filename,
-                "file_url": f"/api/agents/{agent.id}/monitor.pdf", **common}
-    if agent.monitor_url:
-        return {"kind": "link", "url": agent.monitor_url, **common}
-    return None
+def monitors_info(db: Session, monitors: list[Monitor]) -> list[dict]:
+    """Monitors as JSON, like outputs: content as sent; files described, with an address."""
+    files = file_details(db, [m.file_id for m in monitors if m.file_id])
+    result = []
+    for monitor in monitors:
+        item = {"id": monitor.id, "agent_id": monitor.agent_id, "name": monitor.name, "kind": monitor.kind,
+                "content": output_content(monitor), "updated_at": iso(monitor.updated_at)}
+        if monitor.file_id in files:
+            stored = files[monitor.file_id]
+            item["file"] = {"filename": stored.filename, "content_type": stored.content_type, "size": stored.size,
+                            "url": f"/api/agents/{monitor.agent_id}/monitors/{monitor.id}/file"}
+        result.append(item)
+    return result
 
 
 def agent_info(db: Session, agent: Agent, caller: Agent) -> dict:
@@ -374,7 +420,9 @@ def agent_info(db: Session, agent: Agent, caller: Agent) -> dict:
         "folders": [folder.name for folder in folders_of(db, agent.id)],
         "online": is_online(agent), "paused": agent.paused, "accepts_messages": agent.accepts_messages,
         "check_in_every": check_in_interval(agent), "created_at": iso(agent.created_at),
-        "last_seen": iso(agent.last_seen_at), "monitor": monitor_info(agent),
+        "last_seen": iso(agent.last_seen_at),
+        "monitors": [m.name for m in db.exec(select(Monitor).where(Monitor.agent_id == agent.id)
+                                             .order_by(func.lower(Monitor.name))).all()],
     }
 
 
@@ -485,19 +533,33 @@ def read_events(
     return [event_info(event) for event in db.exec(statement).all()]
 
 
-@router.get("/agents/{ref}/monitor")
-def read_monitor(ref: str, caller: Agent = Depends(require_agent), db: Session = Depends(get_session)):
-    """What an agent's Monitor shows: {"monitor": {...}} or {"monitor": null}."""
-    return {"monitor": monitor_info(find_agent(db, caller, ref))}
-
-
-@router.get("/agents/{ref}/monitor.pdf")
-def read_monitor_pdf(ref: str, caller: Agent = Depends(require_agent), db: Session = Depends(get_session)):
+@router.get("/agents/{ref}/monitors")
+def read_monitors(ref: str, name: list[str] | None = Query(None), caller: Agent = Depends(require_agent),
+                  db: Session = Depends(get_session)):
+    """An agent's monitors (each with its current value), A to Z. Optional: only some names (repeat ?name=)."""
     agent = find_agent(db, caller, ref)
-    stored = db.get(StoredFile, agent.monitor_file_id) if agent.monitor_file_id else None
-    if stored is None:
-        raise HTTPException(404, "This agent's monitor isn't a PDF")
-    return file_response(stored, inline=False, filename=agent.monitor_filename or "monitor.pdf")
+    statement = select(Monitor).where(Monitor.agent_id == agent.id)
+    if name:
+        statement = statement.where(Monitor.name.in_(name))
+    return monitors_info(db, list(db.exec(statement.order_by(func.lower(Monitor.name))).all()))
+
+
+@router.get("/agents/{ref}/monitors/{monitor_id}/file")
+def read_monitor_file(ref: str, monitor_id: int, caller: Agent = Depends(require_agent),
+                      db: Session = Depends(get_session)):
+    agent = find_agent(db, caller, ref)
+    monitor = db.get(Monitor, monitor_id)
+    stored = db.get(StoredFile, monitor.file_id) if monitor and monitor.file_id else None
+    if monitor is None or monitor.agent_id != agent.id or stored is None:
+        raise HTTPException(404, "File not found")
+    return file_response(stored, inline=False)
+
+
+@router.get("/agents/{ref}/monitor", include_in_schema=False)
+def read_old_monitor(ref: str, caller: Agent = Depends(require_agent), db: Session = Depends(get_session)):
+    """The earlier version's single monitor: the one called "Monitor"."""
+    monitors = read_monitors(ref, [LEGACY_MONITOR_NAME], caller, db)
+    return {"monitor": monitors[0] if monitors else None}
 
 
 # ---------------------------------------------------------------------------

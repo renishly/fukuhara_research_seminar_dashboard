@@ -1,0 +1,29 @@
+{# A feed's Filter panel "Show" choices: All, then each category (outputs) or
+   monitor, with its tick box, bell and pin. The bell and pin post the form's
+   current ticks with them, so the reply keeps them. The hidden "known" fields
+   tell the server which names are listed, so it can send fresh rows when new
+   ones appear. #}
+<div id="{{ f.section }}-options" class="space-y-1" {% if oob %}hx-swap-oob="true"{% endif %}>
+  {% if f.names %}
+  <label class="flex cursor-pointer items-center gap-2 px-1 py-1 hover:bg-white/50">
+    <input type="checkbox" name="all" value="true" class="checkbox checkbox-sm" {{ 'checked' if f.show_all }}>
+    <span class="font-medium">All</span>
+  </label>
+  {% for row in f.names %}
+  <div class="flex items-center gap-1 px-1 hover:bg-white/50">
+    <label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-1">
+      <input type="checkbox" name="c" value="{{ row.name }}" class="checkbox checkbox-sm" {{ 'checked' if row.name in f.selected }}>
+      <span class="truncate">{{ row.name }}</span>
+    </label>
+    <input type="hidden" name="known" value="{{ row.name }}">
+    <button type="button" class="btn btn-ghost btn-xs {{ '' if row.notify else 'opacity-40' }}"
+            hx-post="/agents/{{ f.agent.id }}/{{ f.section }}/notify" hx-vals='{{ {"name": row.name} | tojson }}'
+            hx-target="#{{ f.section }}-options" hx-swap="outerHTML" aria-pressed="{{ 'true' if row.notify else 'false' }}"
+            aria-label="Notify me about {{ row.name }}" title="{{ 'Notifications on' if row.notify else 'Notify me' }} (coming soon: Discord)">&#128276;</button>
+    {% with agent=f.agent, section=f.section, is_owner=f.is_owner, oob=False %}{% include "partials/feed_pin.html" %}{% endwith %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="text-sm text-base-content/70">No {{ f.feed.nouns }} yet. They appear here once the agent sends {{ "outputs" if f.section == "outputs" else "monitor values" }}.</p>
+  {% endif %}
+</div>

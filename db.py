@@ -230,14 +230,18 @@ class Agent(SQLModel, table=True):
     accepts_inbox: bool = False  # set by the agent: accept_inbox()
     paused: bool = False  # set by the owner's Start/Pause buttons
     last_seen_at: datetime | None = None  # None = never connected
-    # The Monitor: the latest link OR PDF (never both).
+    # What's pinned to the grid card: one output category OR one monitor (by name).
+    pinned_category: str | None = None
+    pinned_monitor_name: str | None = None
+    # Legacy: an agent used to have a single monitor, stored in these columns.
+    # They are no longer used: at startup, move_legacy_monitors() moves any
+    # such monitor into the Monitor table. (Removing columns needs a migration
+    # tool such as Alembic, so they stay.)
     monitor_url: str | None = None
     monitor_file_id: int | None = Field(default=None, foreign_key="storedfile.id")
     monitor_filename: str | None = None
     monitor_label: str | None = None
     monitor_updated_at: datetime | None = None
-    # What's pinned to the grid card: one output category, or the Monitor.
-    pinned_category: str | None = None
     pinned_monitor: bool = False
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -279,6 +283,28 @@ class Output(SQLModel, table=True):
     file_id: int | None = Field(default=None, foreign_key="storedfile.id")
 
 
+class Monitor(SQLModel, table=True):
+    """One of an agent's monitors: a named datapoint that is *replaced* each
+    time the agent sends it (set_monitor(content, name)), unlike an output,
+    which is a one-off item that adds to the list.
+
+    Its content is text, a number, a link, a list/dict (as JSON text), a PDF
+    (shown inside the page) or another file, just like an output's.
+    """
+
+    __table_args__ = (UniqueConstraint("agent_id", "name"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", index=True)
+    name: str  # 1 to 50 characters, unique per agent
+    # "text", "number", "link", "json", "pdf" or "file" (value is then the file's name)
+    kind: str
+    value: str
+    file_id: int | None = Field(default=None, foreign_key="storedfile.id")
+    updated_at: datetime = Field(default_factory=utc_now)  # when the agent made this value
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class Folder(SQLModel, table=True):
     """A folder (tag) a student uses to group their own agents."""
 
@@ -306,6 +332,17 @@ class NotifySetting(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", primary_key=True)
     agent_id: int = Field(foreign_key="agent.id", primary_key=True)
     category: str = Field(primary_key=True)
+
+
+class MonitorNotifySetting(SQLModel, table=True):
+    """A member's bell on one monitor ("notify me when it changes").
+
+    Like NotifySetting for outputs: stored now, sent by a future Discord bot.
+    """
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", primary_key=True)
+    name: str = Field(primary_key=True)
 
 
 class InboxFile(SQLModel, table=True):
@@ -364,6 +401,7 @@ def create_db_and_tables(target_engine=None) -> None:
     add_missing_columns(target_engine)
     with Session(target_engine) as session:
         seed_gens(session)
+        move_legacy_monitors(session)
 
 
 def seed_gens(session: Session) -> None:
@@ -372,6 +410,36 @@ def seed_gens(session: Session) -> None:
     for number in FIRST_GENS:
         if number not in existing:
             session.add(Gen(number=number))
+    session.commit()
+
+
+LEGACY_MONITOR_NAME = "Monitor"  # the name a single, older-style monitor gets
+
+
+def move_legacy_monitors(session: Session) -> None:
+    """Move monitors saved the old way (one per agent, in Agent's monitor_*
+    columns) into the Monitor table, and empty those columns. Runs at every
+    start, but only does anything once per agent."""
+    agents = session.exec(select(Agent).where(
+        (Agent.monitor_url.is_not(None)) | (Agent.monitor_file_id.is_not(None)) | (Agent.pinned_monitor == True)  # noqa: E712
+    )).all()
+    for agent in agents:
+        if agent.monitor_url or agent.monitor_file_id:
+            exists = session.exec(select(Monitor).where(
+                Monitor.agent_id == agent.id, Monitor.name == LEGACY_MONITOR_NAME)).first()
+            if exists is None:
+                session.add(Monitor(
+                    agent_id=agent.id, name=LEGACY_MONITOR_NAME,
+                    kind="pdf" if agent.monitor_file_id else "link",
+                    value=(agent.monitor_filename or "monitor.pdf") if agent.monitor_file_id else agent.monitor_url,
+                    file_id=agent.monitor_file_id, updated_at=agent.monitor_updated_at or utc_now(),
+                ))
+        if agent.pinned_monitor:
+            agent.pinned_monitor_name = LEGACY_MONITOR_NAME
+        agent.monitor_url = agent.monitor_file_id = agent.monitor_filename = None
+        agent.monitor_label = agent.monitor_updated_at = None
+        agent.pinned_monitor = False
+        session.add(agent)
     session.commit()
 
 

@@ -48,9 +48,10 @@ QUICK START: everything this file offers, in the order you'd usually use it
     # 4. Say hello (a status line in the agent's Activity log).
     report("Agent online", "status")
 
-    # 5. Optional: the Monitor, showing either a link to where your data lives,
-    #    or a PDF shown inside the dashboard (only the latest one is kept).
-    set_monitor("https://docs.google.com/spreadsheets/d/...", "Results sheet")
+    # 5. Optional: monitors. A monitor is a named datapoint you keep up to
+    #    date: each set_monitor(content, name) REPLACES that monitor's value
+    #    (outputs, below, are one-off items that add to a list instead).
+    set_monitor("https://docs.google.com/spreadsheets/d/...", "Results sheet")  # a link
 
     # 6. Your agent's work loop.
     while True:
@@ -64,7 +65,9 @@ QUICK START: everything this file offers, in the order you'd usually use it
         output("https://example.com/story", "links")           # a clickable link
         output({"top": "story", "count": 12}, "stats")         # a list or dict
         output(Path("reports/today.pdf"), "reports")           # a file, up to 5 MB
-        set_monitor(Path("daily_summary.pdf"), "Daily summary")  # a PDF on schedule
+        set_monitor(12, "Papers in queue")                     # a number, kept up to date
+        set_monitor("Reading paper 3 of 12", "Status")         # a status line
+        set_monitor(Path("daily_summary.pdf"), "Daily summary")  # a PDF, shown in the page
 
     # A short script that runs on a schedule and then exits should end with:
     flush()                          # try to send anything still waiting
@@ -86,10 +89,13 @@ FUNCTIONS
                              (pathlib.Path, open file, or bytes; up to 5 MB).
   report(message, kind)      A status line in Activity. kind: "log" (blue),
                              "status" (green) or "error" (red).
-  set_monitor(link_or_pdf, label)
-                             The Monitor: an http(s) link, a PDF (up to 5 MB) shown
-                             inside the page, or None to remove it. The label is up
-                             to 50 characters.
+  set_monitor(content, name="Monitor")
+                             Keep a named datapoint up to date: each call REPLACES
+                             the value of the monitor called `name` (1-50
+                             characters; up to 100 monitors per agent). content: as
+                             for output(); a PDF is shown inside the page. None
+                             removes that monitor. Outputs are one-off items;
+                             monitors are values that change.
   start_check_ins(every)     Check in automatically every `every` seconds, in the
                              background (for agents that run all the time).
   check_in(every=None)       Check in once, now (for agents that run on a schedule:
@@ -114,15 +120,18 @@ FUNCTIONS
   Reading (any agent in the same class; `agent` is "me", an agent's id, or its
   exact name; if two agents in the class share a name, use the id):
   agents()                   Every agent in the class: id, name, owner, description,
-                             online, paused, monitor, ...
+                             online, paused, monitors (their names), ...
   read_agent(agent="me")     One agent, plus its output categories.
   read_outputs(agent="me", category=None, after=None, before=None, limit=50, offset=0)
                              Its outputs, newest first, as dicts (content as sent).
   read_activity(agent="me", kind=None, after=None, before=None, limit=50, offset=0)
                              Its Activity log, newest first.
-  read_monitor(agent="me")   What its Monitor shows (a link or a PDF), or None.
+  read_monitors(agent="me", names=None)
+                             Its monitors with their current values, A to Z.
+  read_monitor(agent="me", name="Monitor")
+                             One monitor (a dict), or None.
   download(item, save_to=None)
-                             The bytes of a file output or a PDF monitor.
+                             The bytes of a file output or a file/PDF monitor.
   Deleting (THIS agent's own data only; each delete is noted in its Activity):
   delete_output(item)        One output (from read_outputs(), or its id).
   delete_outputs(category=None, before=None, everything=False)
@@ -130,7 +139,8 @@ FUNCTIONS
   delete_event(item)         One Activity line.
   delete_activity(kind=None, before=None, everything=False)
                              Many Activity lines.
-  set_monitor(None)          Removes the Monitor (see above).
+  delete_monitors(name=None, everything=False)
+                             Remove one of its monitors now, or all of them.
   The dashboard keeps each agent's newest 1,000 outputs and 2,000 Activity
   lines; older ones are deleted automatically.
   All of them return quickly and never raise: problems are printed as one-line
@@ -547,14 +557,14 @@ def _deliver(item: dict) -> None:
             files={"file": (item["filename"], _item_data(item), item["content_type"])},
         )
     elif kind == "monitor":
-        _send("PUT", "/api/monitor", REPORT_TIMEOUT_SECONDS, json={**item["body"], "created_at": made})
+        _send("PUT", "/api/monitors", REPORT_TIMEOUT_SECONDS, json={**item["body"], "created_at": made})
     elif kind == "monitor_file":
         _send(
             "POST",
-            "/api/monitor/file",
+            "/api/monitors/file",
             UPLOAD_TIMEOUT_SECONDS,
-            data={"label": item["label"] or "", "created_at": made},
-            files={"file": (item["filename"], _item_data(item), "application/pdf")},
+            data={"name": item["name"], "created_at": made},
+            files={"file": (item["filename"], _item_data(item), item["content_type"])},
         )
 
 
@@ -572,10 +582,13 @@ def _add_to_buffer(item: dict) -> int:
     with _buffer_lock:
         items = _load_queue()
         if item["kind"] in ("monitor", "monitor_file"):
-            # Only the latest monitor matters: drop older ones still waiting.
-            for old in [i for i in items if i["kind"] in ("monitor", "monitor_file")]:
+            # Only a monitor's latest value matters: drop older values of the
+            # same monitor still waiting (other monitors keep theirs).
+            def same_monitor(other):
+                return other["kind"] in ("monitor", "monitor_file") and _monitor_name(other) == _monitor_name(item)
+            for old in [i for i in items if same_monitor(i)]:
                 _delete_item_file(old)
-            items = [i for i in items if i["kind"] not in ("monitor", "monitor_file")]
+            items = [i for i in items if not same_monitor(i)]
         if "_data" in item:  # copy the file into the buffer folder
             os.makedirs(os.path.join(BUFFER_DIR, "files"), exist_ok=True)
             item["file"] = uuid.uuid4().hex
@@ -603,6 +616,10 @@ def _remove_from_buffer(item_id: str) -> None:
             if item["id"] == item_id:
                 _delete_item_file(item)
         _save_queue([i for i in items if i["id"] != item_id])
+
+
+def _monitor_name(item: dict) -> str:
+    return item.get("name") or (item.get("body") or {}).get("name") or "Monitor"
 
 
 def flush() -> int:
@@ -733,7 +750,10 @@ def _read_file(content) -> tuple[str, bytes]:
 
 
 def output(content, category: str) -> bool:
-    """Send a result to this agent's Outputs section on the dashboard, like print().
+    """Send a one-off result to this agent's Outputs section on the dashboard, like print().
+
+    Each call adds a new item. For a value that changes (a count, a status,
+    the latest report), use set_monitor() instead: it replaces the old value.
 
     content:  what to show. Text, a number, a link ("https://..."), a list or
               dict, or a file: a pathlib.Path, an open file, or bytes (max 5 MB).
@@ -769,43 +789,48 @@ def output(content, category: str) -> bool:
     return _send_or_buffer(item, what)
 
 
-def set_monitor(link_or_pdf, label: str | None = None) -> bool:
-    """Set what this agent's Monitor section shows. Only the latest one is shown.
+def set_monitor(content, name: str = "Monitor") -> bool:
+    """Keep a named datapoint up to date on the dashboard's Monitors section.
 
-    link_or_pdf:
-      - a web address (http:// or https://) of where the agent's data lives,
-        e.g. a Google Sheet or a Grafana board; or
-      - a PDF (a pathlib.Path, an open file, or bytes; max 5 MB), shown inside
-        the dashboard page. Call it again on a schedule (e.g. a daily summary)
-        and the page swaps in the new PDF within about 10 seconds; or
-      - None, to remove the monitor.
-    Returns True if the dashboard got it now. If the dashboard couldn't be
-    reached, the latest monitor is saved and sent later (see "Offline buffer").
+    Each call REPLACES the value of the monitor called `name` (unlike output(),
+    which adds a one-off item to a list). Use it for things that change: a
+    count, a status, the latest summary PDF, a link to a live sheet...
+
+    content: text, a number, an http(s) link, a list/dict, or a file (a
+             pathlib.Path, an open file, or bytes; up to 5 MB). A PDF is shown
+             inside the dashboard page; images too; other files are downloads.
+             None removes the monitor.
+    name:    1 to 50 characters. An agent can have up to 100 monitors.
+    Returns True if the dashboard got it now. If not, only the latest value of
+    each monitor is saved and sent later (see "Offline buffer"). While paused,
+    monitor updates are held like outputs.
     """
     if PROBLEM:
         return False
-    if _is_file(link_or_pdf):
+    name = " ".join(str(name).split())
+    what = f"set monitor {name!r}"
+    if _is_file(content):
         try:
-            name, data = _read_file(link_or_pdf)
+            filename, data = _read_file(content)
         except OSError as error:
-            _warn("set the monitor", error)
-            return False
-        if not data.startswith(b"%PDF-"):
-            print(f"[dashboard] Not setting the monitor: {name!r} isn't a PDF.")
+            _warn(what, error)
             return False
         if len(data) > MAX_FILE_BYTES:
-            print(f"[dashboard] Not setting the monitor: {name!r} is over 5 MB.")
+            print(f"[dashboard] Not setting monitor {name!r}: {filename!r} is over 5 MB.")
             return False
-        item = {"kind": "monitor_file", "filename": name, "label": label, "_data": data}
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        item = {"kind": "monitor_file", "name": name, "filename": filename, "content_type": content_type,
+                "_data": data}
     else:
-        item = {"kind": "monitor", "body": {"url": link_or_pdf, "label": label}}
-    return _send_or_buffer(item, "set the monitor")
+        body = json.loads(json.dumps({"name": name, "content": content}, default=str))
+        item = {"kind": "monitor", "body": body}
+    return _send_or_buffer(item, what)
 
 
 # =============================================================================
 # Reading the dashboard, and deleting this agent's own data
 #
-# Any agent can read the outputs, activity and monitor of every agent in the
+# Any agent can read the outputs, activity and monitors of every agent in the
 # same class (to build on each other's work). An agent can only delete its OWN data; trying to delete
 # another agent's gets a warning and changes nothing. Deletes are noted in this
 # agent's Activity log on the dashboard.
@@ -860,7 +885,7 @@ def agents() -> list[dict] | None:
     """Every agent in this agent's class, A to Z: id, name, owner ({"full_name",
     "gen"}), description (what it does, written by its owner; None if not set),
     "you" (True for this agent), folders, online, paused, accepts_messages,
-    check_in_every, created_at, last_seen, and monitor (or None)."""
+    check_in_every, created_at, last_seen, and monitors (their names)."""
     return _read("/api/agents", "list the agents")
 
 
@@ -895,19 +920,28 @@ def read_activity(agent="me", kind=None, after=None, before=None, limit: int = 5
     return _read(_agent_path(agent) + "/events", f"read activity of {agent!r}", params)
 
 
-def read_monitor(agent="me") -> dict | None:
-    """What an agent's Monitor shows: {"kind": "link", "url", "label", "updated_at"}
-    or {"kind": "pdf", "filename", "label", "updated_at", "file_url"}. None if it
-    has no monitor (or it couldn't be read: then a warning is printed).
-    Get a PDF's bytes with download()."""
-    reply = _read(_agent_path(agent) + "/monitor", f"read the monitor of {agent!r}")
-    return reply.get("monitor") if isinstance(reply, dict) else None
+def read_monitors(agent="me", names=None) -> list[dict] | None:
+    """An agent's monitors with their current values, A to Z.
+
+    names: one monitor name, or a list of them (default: all).
+    Each is a dict: id, agent_id, name, kind ("text", "number", "link", "json",
+    "pdf" or "file"), content (as sent; a file's name for files), updated_at,
+    and for files "file": {filename, content_type, size, url} (bytes: download()).
+    """
+    params = {"name": [names] if isinstance(names, str) else names}
+    return _read(_agent_path(agent) + "/monitors", f"read the monitors of {agent!r}", params)
+
+
+def read_monitor(agent="me", name: str = "Monitor") -> dict | None:
+    """One of an agent's monitors (as in read_monitors()), or None if it has no such monitor."""
+    monitors = read_monitors(agent, name)
+    return monitors[0] if monitors else None
 
 
 def download(item, save_to=None) -> bytes | None:
-    """The bytes of a file output or a PDF monitor, from any agent.
+    """The bytes of a file output or a file/PDF monitor, from any agent.
 
-    item:    an output from read_outputs(), a monitor from read_monitor(), or the id
+    item:    an output from read_outputs(), a monitor from read_monitors(), or the id
              of one of THIS agent's file outputs.
     save_to: optional path to also save the file to.
     Returns None (with a warning) if there's no file or it couldn't be fetched.
@@ -963,6 +997,17 @@ def delete_outputs(category: str | None = None, before=None, everything: bool = 
         return None
     params = {"category": category, "before": _as_time(before), "all": "true" if everything else None}
     return _delete("/api/outputs", "delete outputs", params)
+
+
+def delete_monitors(name: str | None = None, everything: bool = False) -> int | None:
+    """Remove one of THIS agent's monitors now (`name`), or all of them with
+    everything=True. (set_monitor(None, name) does the same, but is held while
+    paused and buffered offline like other updates.) Returns how many were removed."""
+    if name is None and not everything:
+        print("[dashboard] Not deleting: give a monitor name, or everything=True.")
+        return None
+    params = {"name": name, "all": "true" if everything else None}
+    return _delete("/api/monitors", "delete monitors", params)
 
 
 def delete_event(item) -> bool:

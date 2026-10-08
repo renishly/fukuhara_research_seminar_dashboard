@@ -1,0 +1,49 @@
+{# A feed on an agent's page: Outputs or Monitors (f.section). Both work the
+   same way:
+   - outputs:  one-off items the agent sent with output(content, category);
+   - monitors: named datapoints the agent keeps up to date with
+               set_monitor(content, name); each new value replaces the last.
+   Nothing is shown until the viewer chooses in the Filter (a pinned name
+   starts ticked). The Filter panel holds "All", a tick box per name with its
+   bell (notify me) and pin (owner only), and the sort. Changing the Filter
+   reloads only the list, which also reloads itself every few seconds with the
+   Filter's current values, so an open panel is never redrawn under the mouse. #}
+{% set s = f.section %}
+<section id="{{ s }}" class="card">
+  <div class="card-body gap-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="card-title">{{ f.feed.title }}</h2>
+      <div class="relative" x-data="{ open: false }" @click.outside="open = false" @keydown.escape.window="open = false">
+        <button type="button" class="btn btn-sm" @click="open = !open" :aria-expanded="open">
+          <span aria-hidden="true">&#9776;</span> Filter: {% include "partials/feed_summary.html" %} <span aria-hidden="true">&#9662;</span>
+        </button>
+        <div x-show="open" x-cloak x-transition.origin.top.right class="panel absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-2rem)] p-4">
+          <form id="{{ s }}-filter" class="space-y-4" hx-get="/agents/{{ f.agent.id }}/{{ s }}" hx-trigger="change"
+                hx-target="#{{ s }}-list" hx-swap="innerHTML">
+            <div>
+              <p class="mb-2 text-xs font-semibold uppercase tracking-wide">Show</p>
+              {% include "partials/feed_options.html" %}
+            </div>
+            <div class="space-y-2 border-t border-base-content/30 pt-3">
+              <p class="text-xs font-semibold uppercase tracking-wide">Sort by</p>
+              <select name="sort" class="select select-sm w-full" aria-label="Sort by">
+                {% for value, label in f.feed.sorts.items() %}<option value="{{ value }}" {{ 'selected' if value == f.sort }}>{{ label }}</option>{% endfor %}
+              </select>
+              <div class="join w-full">
+                <input type="radio" name="order" value="desc" aria-label="Descending" class="join-item btn btn-sm flex-1" {{ 'checked' if f.order == 'desc' }}>
+                <input type="radio" name="order" value="asc" aria-label="Ascending" class="join-item btn btn-sm flex-1" {{ 'checked' if f.order == 'asc' }}>
+              </div>
+              <p class="text-xs text-base-content/70">Descending = newest first for dates, Z&ndash;A for names.</p>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div id="{{ s }}-list" hx-get="/agents/{{ f.agent.id }}/{{ s }}"
+         hx-trigger="every {{ 3 if s == 'outputs' else 5 }}s [document.visibilityState === 'visible']"
+         hx-include="#{{ s }}-filter, #{{ s }}-seen" hx-swap="innerHTML">
+      {% include "partials/feed_list.html" %}
+      <input type="hidden" id="{{ s }}-seen" name="seen" value="">
+    </div>
+  </div>
+</section>

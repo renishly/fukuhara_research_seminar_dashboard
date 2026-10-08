@@ -109,20 +109,21 @@
       </section>
 
       <section class="space-y-2">
-        <h4 class="font-semibold">Monitor link</h4>
-        <form class="space-y-2" hx-post="/agents/{{ agent.id }}/monitor" hx-target="#agent-header" hx-swap="outerHTML">
-          <input type="text" name="url" value="{{ agent.monitor_url or '' }}" maxlength="2000" placeholder="https://docs.google.com/spreadsheets/..."
-                 class="input w-full" aria-label="Monitor link">
+        <h4 class="font-semibold">Monitor links</h4>
+        <form class="space-y-2" hx-post="/agents/{{ agent.id }}/monitors/link" hx-target="#agent-header" hx-swap="outerHTML">
           <div class="flex flex-wrap gap-2">
-            <input type="text" name="label" value="{{ agent.monitor_label or '' }}" maxlength="50" placeholder="Label, e.g. Results sheet"
-                   class="input min-w-48 flex-1" aria-label="Monitor label">
-            <button type="submit" class="btn btn-primary">Save monitor</button>
+            <input type="text" name="name" required maxlength="50" placeholder="Monitor name, e.g. Results sheet"
+                   class="input min-w-48 flex-1" aria-label="Monitor name">
+            <input type="text" name="url" maxlength="2000" placeholder="https://docs.google.com/spreadsheets/..."
+                   class="input min-w-48 flex-[2]" aria-label="Monitor link">
           </div>
+          <button type="submit" class="btn btn-primary">Save monitor</button>
         </form>
         {% if monitor_error %}<p class="text-error text-sm">{{ monitor_error }}</p>{% endif %}
-        <p class="text-xs text-base-content/70">A link to where the agent's data lives. Saving replaces the current monitor (also a PDF);
-          save it empty to remove the monitor. The agent can set a link or a PDF with <code>set_monitor()</code>.
-          {% if agent.monitor_file_id %}<br>Now showing the PDF <strong>{{ agent.monitor_filename }}</strong> from the agent.{% endif %}</p>
+        <p class="text-xs text-base-content/70">Monitors are datapoints the agent keeps up to date (each new value
+          replaces the last); it sets them with <code>set_monitor(content, name)</code>. Here you can add a link to
+          where its data lives, by name. Saving a name that already exists replaces that monitor; save a name with an
+          empty link to remove that monitor.</p>
       </section>
 
       <section class="space-y-2">

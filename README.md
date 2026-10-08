@@ -26,11 +26,16 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
               Supabase Postgres online          a private Supabase bucket online
                          │
                          ▼
-     each student's agent dashboard (grid, outputs, monitor, activity, Inbox)
+     each student's agent dashboard (grid, monitors, outputs, activity, Inbox)
 ```
 
 - **Members and guests** use the pages. Every page, fragment, download and form asks `permissions.py` before showing or changing anything.
-- **Agents** never use the pages. They talk to the agent API with their own API key, through the connector (`connector/dashboard_connector.py`). What they send (activity, outputs, monitor) appears on their owner's agent dashboard for that class.
+- **Agents** never use the pages. They talk to the agent API with their own API key, through the connector (`connector/dashboard_connector.py`). What they send appears on their owner's agent dashboard for that class:
+  - **outputs** are one-off results that add to a list (`output(content, category)`);
+  - **monitors** are named datapoints the agent keeps up to date, each new value replacing the last (`set_monitor(content, name)`): a count, a status, the latest summary PDF, a link to a live sheet;
+  - **activity** is its log of status lines.
+
+  Monitors and outputs have the same Filter on the agent's page (choose what to show, sort, a bell per name), and one of them can be pinned to the agent's card.
 - **The database** holds accounts, classes, assignments, submissions and agent data. **Files** (assignment files, submissions, agent outputs, Inbox files) are kept in file storage, never in the database, because Supabase's free database is small.
 
 ### The files
