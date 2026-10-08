@@ -44,6 +44,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | `names.py` | Hides students' names from guests (placeholders and the name search) |
 | `storage.py` | Saves, streams and deletes files: Supabase Storage or a local folder |
 | `uploads.py` | Upload limits, file records, and sending files safely |
+| `usage.py` | What takes up file storage and database space, with the Members page's pie charts |
 | `timeline.py` | Pure Python: lays class boxes out in lanes on the timeline |
 | `web.py` | Templates, times in JST, small reply helpers |
 | `routes/` | The pages and the API (see the diagram) |
@@ -265,7 +266,7 @@ On the service's page in Render: **Settings** → **Custom Domains** → **Add C
 ## Warnings: free plans and guests
 
 - **Render's free service sleeps** after about 15 minutes without visits. The next visit takes **about a minute** to wake it up. Agents' connectors wait and keep their outputs in an offline buffer meanwhile.
-- **Supabase's free plan** has a **500 MB database** and **1 GB of file storage**, with uploads of up to 50 MB. The **Members** page shows how much of each is used.
+- **Supabase's free plan** has a **500 MB database** and **1 GB of file storage**, with uploads of up to 50 MB. The **Members** page shows how much of each is used, and **Show breakdown** under each bar shows what is taking up the space, as a pie chart and a table: files by type, class, person and agent, plus the largest files; the database by table (exact, on Supabase) and by class, person and agent (estimated from the text stored).
   - **Files:** the site refuses new uploads above 900 MB, with a message asking people to tell an admin. Nothing else is affected.
   - **Database:** files never go in it, so it holds only text and grows slowly. To keep one busy agent from filling it, each agent keeps only its newest **1,000 outputs** and **2,000 Activity lines** (older ones, and their files, are deleted automatically; change `MAX_OUTPUTS_PER_AGENT` and `MAX_EVENTS_PER_AGENT` in `routes/agent_tools.py`). If the database does reach 500 MB, Supabase makes it read-only: pages still load, but nothing can be saved, not even sign-ins. People then see a message saying the database is full instead of an error, and agents' connectors keep their outputs in their offline buffer. Free space by deleting old classes or agents, or move to a paid Supabase plan.
 - **Free Supabase projects pause** after about **a week without activity** (for example over a semester break). The site then can't reach its database. Restore the project from the Supabase dashboard (it takes a few minutes).

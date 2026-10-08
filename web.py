@@ -125,6 +125,8 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.filters["jst"] = jst
 templates.env.filters["relative"] = relative_time
 templates.env.filters["human_size"] = human_size
+# A percentage for tables, e.g. "12.5%"; tiny but not-zero shares read "<0.1%".
+templates.env.filters["percent"] = lambda share: "<0.1%" if 0 < share < 0.1 else f"{share:.1f}%"
 templates.env.globals["course_name"] = course_name
 templates.env.globals["timespan_label"] = timespan_label
 templates.env.globals["gen_label"] = gen_label

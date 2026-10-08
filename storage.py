@@ -45,10 +45,17 @@ def _supabase() -> tuple[str, str, str] | None:
 
 
 def _headers(key: str) -> dict:
-    # Supabase wants the key twice: "apikey" for its gateway, and as a bearer
-    # token for Storage itself. The service key can read every private file,
-    # so it must only ever be used here, on the server.
-    return {"apikey": key, "Authorization": f"Bearer {key}"}
+    """How to send the service key. It can read every private file, so it is
+    only ever used here, on the server.
+
+    Newer Supabase secret keys ("sb_secret_...") go only in the "apikey"
+    header: they aren't JWTs, so sending one as a bearer token fails. Older
+    "service_role" keys are JWTs (they start with "eyJ") and are also sent as
+    a bearer token, as Supabase expects for those.
+    """
+    if key.startswith("eyJ"):
+        return {"apikey": key, "Authorization": f"Bearer {key}"}
+    return {"apikey": key}
 
 
 def local_dir() -> Path:

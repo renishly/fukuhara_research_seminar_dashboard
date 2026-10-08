@@ -467,6 +467,31 @@ code.block {
   }
 }
 
+/* --- Storage breakdowns on the Members page (pie charts and tables) ----------- */
+.usage-slice {
+  transition: opacity 0.15s ease;
+}
+.usage-slice:hover {
+  opacity: 0.75;
+}
+.usage-total {
+  fill: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+}
+.usage-caption {
+  fill: var(--ink);
+  opacity: 0.7;
+  font-size: 11px;
+}
+.usage-swatch {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
 /* --- The login page title, typing itself out ----------------------------------------
    Each letter is its own <span> (see login.html), appearing one after
    another, so the title can wrap onto several lines on phones. */

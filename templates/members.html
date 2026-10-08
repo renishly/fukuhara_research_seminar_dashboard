@@ -83,13 +83,18 @@
   </div>
   {% endif %}
 
-  <div class="grid gap-6 md:grid-cols-2">
+  <div class="space-y-6">
     <section class="card">
       <div class="card-body gap-2">
         <h2 class="card-title">File storage</h2>
         <progress class="progress w-full" value="{{ storage_percent }}" max="100"></progress>
         <p class="text-sm">{{ storage_used | human_size }} of {{ storage_limit | human_size }} used ({{ storage_percent }}%).
           New uploads are refused above that, to stay inside Supabase's free 1 GB.</p>
+        {# The breakdown is only worked out when opened. #}
+        <details class="pt-1" hx-get="/members/usage/files" hx-trigger="toggle once" hx-target="find .usage">
+          <summary class="cursor-pointer text-sm font-semibold">Show breakdown</summary>
+          <div class="usage pt-3"><span class="loading loading-dots"></span></div>
+        </details>
       </div>
     </section>
     <section class="card">
@@ -102,6 +107,10 @@
         {% else %}
         <p class="text-sm">The database's size can't be read right now.</p>
         {% endif %}
+        <details class="pt-1" hx-get="/members/usage/database" hx-trigger="toggle once" hx-target="find .usage">
+          <summary class="cursor-pointer text-sm font-semibold">Show breakdown</summary>
+          <div class="usage pt-3"><span class="loading loading-dots"></span></div>
+        </details>
       </div>
     </section>
   </div>

@@ -1,0 +1,65 @@
+{# A storage breakdown: one tab per view (by type, class, person...). Each
+   view has a donut chart (hover a slice for its size) and a table with every
+   row, which is also the chart's legend and its text version. The six biggest
+   rows get their own colour; smaller ones share the grey "Other" slice. #}
+{% if not views or (views | sum(attribute="total")) == 0 %}
+<p class="text-sm">Nothing is stored yet.</p>
+{% else %}
+<div x-data="{ view: '{{ views[0].key }}' }" class="space-y-4">
+  <div class="join flex-wrap" role="tablist" aria-label="Breakdown">
+    {% for v in views %}
+    <button type="button" role="tab" class="join-item btn btn-sm" :class="{ 'btn-primary': view === '{{ v.key }}' }"
+            :aria-selected="view === '{{ v.key }}'" @click="view = '{{ v.key }}'">{{ v.title }}</button>
+    {% endfor %}
+  </div>
+
+  {% for v in views %}
+  <section x-show="view === '{{ v.key }}'" {% if not loop.first %}x-cloak{% endif %} class="space-y-3">
+    {% if v.note %}<p class="text-xs text-base-content/70">{{ v.note }}</p>{% endif %}
+    {% if not v.rows %}
+    <p class="text-sm">Nothing here yet.</p>
+    {% else %}
+    <div class="flex flex-col gap-6 md:flex-row md:items-start">
+      {% if v.pie %}
+      <figure class="mx-auto w-48 shrink-0 md:mx-0">
+        <svg viewBox="0 0 200 200" class="h-48 w-48" role="img"
+             aria-label="{{ v.title }}: pie chart of {{ v.total | human_size }}; the table lists every value">
+          {% for slice in v.slices %}
+          <path d="{{ slice.path }}" fill="{{ slice.colour }}" stroke="#dde9f9" stroke-width="{{ 2 if v.slices | length > 1 else 0 }}" class="usage-slice">
+            <title>{{ slice.label }}: {{ slice.size | human_size }} ({{ slice.share | percent }})</title>
+          </path>
+          {% endfor %}
+          <text x="100" y="96" text-anchor="middle" class="usage-total">{{ v.total | human_size }}</text>
+          <text x="100" y="116" text-anchor="middle" class="usage-caption">in total</text>
+        </svg>
+      </figure>
+      {% endif %}
+      <div class="min-w-0 flex-1 overflow-x-auto">
+        <table class="table table-sm">
+          <thead><tr>
+            {% if v.pie %}<th class="w-6"><span class="sr-only">Colour</span></th>{% endif %}
+            <th>{{ "File" if v.key == "files-largest" else "What" }}</th>
+            {% if v.key == "files-largest" %}<th>Belongs to</th>{% endif %}
+            <th class="text-right">Size</th>
+            <th class="text-right">Share</th>
+          </tr></thead>
+          <tbody>
+            {% for row in v.rows %}
+            <tr>
+              {% if v.pie %}<td><span class="usage-swatch" style="background: {{ row.colour }}" aria-hidden="true"></span></td>{% endif %}
+              <td class="break-words">{{ row.label }}</td>
+              {% if v.key == "files-largest" %}<td class="text-xs">{{ row.detail }}</td>{% endif %}
+              <td class="whitespace-nowrap text-right font-mono">{{ row.size | human_size }}</td>
+              <td class="whitespace-nowrap text-right font-mono">{{ row.share | percent }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if v.hidden_rows %}<p class="pt-2 text-xs">&hellip; and {{ v.hidden_rows }} smaller ones (in &ldquo;Other&rdquo;).</p>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endif %}

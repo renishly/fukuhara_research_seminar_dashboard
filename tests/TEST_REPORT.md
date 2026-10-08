@@ -66,7 +66,7 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_timeline_reaches_back_to_the_oldest_class_and_three_years_forward` | The timeline starts 12 months back or at the oldest class (whichever is earlier) and reaches 3 years forward, or further for a class that ends later. |
 | `test_a_tick_on_every_friday_on_its_exact_date` | There is a tick on every Friday (4–5 a month), each on its exact date, kept clear of the month borders. |
 
-### `test_coursework.py` (30 tests)
+### `test_coursework.py` (31 tests)
 
 | Test | What it checks |
 |---|---|
@@ -100,6 +100,7 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_new_submission_marks_the_class_until_its_page_is_opened` | Someone else's new submission puts a mark on the class's timeline box for each other member until they open the class; never for your own. |
 | `test_new_members_only_see_marks_for_submissions_after_they_registered` | New accounts only get marks for submissions made after they registered. |
 | `test_guests_get_no_notification_marks` | Guests never get notification marks. |
+| `test_supabase_keys_are_sent_the_way_each_kind_needs` | New `sb_secret_` keys go only in the `apikey` header; legacy `service_role` JWTs are also sent as a bearer token. |
 
 ### `test_agents.py` (33 tests)
 
@@ -156,7 +157,7 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_guests_are_refused_on_every_upload_edit_and_control_route` | Guests get 403 on every create, edit, delete, upload and control route, and see no such buttons. |
 | `test_guests_never_see_the_members_page_or_login_ids` | Guests and students can't open the Members page; admins see Login IDs and placeholders there. |
 
-### `test_members.py` (9 tests)
+### `test_members.py` (13 tests)
 
 | Test | What it checks |
 |---|---|
@@ -169,6 +170,10 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_folders_belong_to_their_student_and_are_shared_across_classes` | Folders belong to one student, are shared across their classes with per-class contents, can't be used or changed by others, and deleting keeps agents. |
 | `test_grid_pages_hold_nine_cells_including_add_agent` | The grid holds 9 cells per page with the owner's Add Agent card counting as one. |
 | `test_members_page_shows_the_database_size` | The Members page shows the database size out of 500 MB. |
+| `test_file_storage_breakdown_by_type_class_person_agent_and_largest` | The file breakdown adds up exact sizes by type, class, person and agent, and lists the largest files with what they belong to. |
+| `test_pie_gives_six_colours_then_other` | The pie gives the six biggest rows their own colour (in fixed order), puts the rest in a grey "Other" slice, and its shares add up to 100%; a single row is a whole ring. |
+| `test_database_breakdown_estimates_by_class_person_and_agent` | The database breakdown estimates each agent's, person's and class's share from the text they store, and says it's an estimate. |
+| `test_breakdowns_are_for_admins_only` | Breakdowns load only for admins (students and guests get 403), and only when opened. |
 
 ## 2. Result of `pytest -v`
 
@@ -287,7 +292,8 @@ tests/test_coursework.py::test_deleting_a_task_keeps_its_submissions PASSED [ 81
 tests/test_coursework.py::test_due_time_is_entered_and_shown_in_jst PASSED [ 82%]
 tests/test_coursework.py::test_new_submission_marks_the_class_until_its_page_is_opened PASSED [ 82%]
 tests/test_coursework.py::test_new_members_only_see_marks_for_submissions_after_they_registered PASSED [ 83%]
-tests/test_coursework.py::test_guests_get_no_notification_marks PASSED   [ 84%]
+tests/test_coursework.py::test_guests_get_no_notification_marks PASSED
+tests/test_coursework.py::test_supabase_keys_are_sent_the_way_each_kind_needs PASSED   [ 84%]
 tests/test_guests.py::test_placeholders_are_fixed_and_never_reused PASSED [ 85%]
 tests/test_guests.py::test_name_search_catches_parts_case_widths_and_other_names PASSED [ 85%]
 tests/test_guests.py::test_members_always_see_the_original_text PASSED   [ 86%]
@@ -308,8 +314,12 @@ tests/test_members.py::test_admins_cannot_delete_themselves PASSED       [ 97%]
 tests/test_members.py::test_add_the_next_gen PASSED                      [ 97%]
 tests/test_members.py::test_folders_belong_to_their_student_and_are_shared_across_classes PASSED [ 98%]
 tests/test_members.py::test_grid_pages_hold_nine_cells_including_add_agent PASSED [ 99%]
-tests/test_members.py::test_members_page_shows_the_database_size PASSED  [100%]
-============================= 134 passed in 22.58s =============================
+tests/test_members.py::test_members_page_shows_the_database_size PASSED
+tests/test_members.py::test_file_storage_breakdown_by_type_class_person_agent_and_largest PASSED
+tests/test_members.py::test_pie_gives_six_colours_then_other PASSED
+tests/test_members.py::test_database_breakdown_estimates_by_class_person_and_agent PASSED
+tests/test_members.py::test_breakdowns_are_for_admins_only PASSED  [100%]
+============================= 139 passed in 23.46s =============================
 ```
 
 ## 3. Manual end-to-end check (Instructions step 7)
@@ -348,6 +358,7 @@ Result: 24 of 24 checks passed. The pages were also looked at in a browser (time
 ## 4. Known limitations and what could not be verified
 
 - **Render and Supabase were not used.** Deploying (Render Blueprint, Supabase Postgres via the Session pooler, the private `seminar-files` bucket) can only be done by the user. The Supabase Storage calls in `storage.py` (upload `POST /storage/v1/object/{bucket}/{path}`, download `GET` on the same path, delete `DELETE /storage/v1/object/{bucket}` with `prefixes`) follow Supabase's Storage REST API but were never run against a real project; the tests use the local-folder storage. Postgres was likewise not tested (only SQLite); `add_missing_columns()` was tested on SQLite.
+- **The database breakdown "By table" was only exercised through its fallback**: this Mac's SQLite can't measure tables, so the exact per-table sizes (Postgres's `pg_total_relation_size`) will first be seen on Supabase. The pie charts were checked by eye in one browser.
 - **Browser-only behaviour is not covered by the automated tests**: drag-to-pan, centring the timeline, zoom keeping the centre date, the background grid's rush, the typing title and other animations, and HTMX/Alpine interactions. They were checked by eye in one desktop browser and at phone width, not across browsers or on a real touch device.
 - **Rate limiting is in memory**, per address taken from the first `X-Forwarded-For` entry. It resets when the site restarts, and is only correct while the site runs as a single instance (as on Render's free plan). A client can put a fake first address in `X-Forwarded-For`, so the limit slows guessing rather than making it impossible.
 - **The name search cannot read inside files**, and it only knows names written as full name, name parts of 2+ characters, or listed "other names". A name written some other way (for example an unlisted spelling, or half-width katakana with separate voicing marks) is not caught.

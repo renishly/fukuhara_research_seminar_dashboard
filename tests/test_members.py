@@ -130,3 +130,70 @@ def test_grid_pages_hold_nine_cells_including_add_agent(make_person, create_clas
 def test_members_page_shows_the_database_size(admin):
     page = admin.get("/members").text
     assert "Database" in page and "of 500.0 MB used" in page
+
+
+# --- Storage breakdowns ------------------------------------------------------------------------
+
+
+def test_file_storage_breakdown_by_type_class_person_agent_and_largest(engine, client, admin, make_person,
+                                                                       create_class, create_agent):
+    from usage import file_breakdown
+    from test_agents import api
+
+    course = create_class(title="Methods", enrolled_gens=[9])
+    taro = make_person("student", "taro", "Yamada Taro", gen=9)
+    submit(taro, course, file=("essay.txt", b"x" * 3000, "text/plain"))
+    create_agent(taro, course, "helper")
+    client.post("/api/outputs/file", data={"category": "files"}, files={"file": ("chart.png", b"y" * 1000, "image/png")},
+                headers=api("helper"))
+    with Session(engine) as db:
+        views = {view.key: view for view in file_breakdown(db)}
+    by_type = {row.label: row.size for row in views["files-type"].rows}
+    assert by_type == {"Submission files": 3000, "Agent output files": 1000}
+    assert views["files-type"].total == 4000 and views["files-type"].rows[0].share == 75
+    assert [(r.label, r.size) for r in views["files-class"].rows] == [("Methods", 4000)]
+    assert [(r.label, r.size) for r in views["files-person"].rows] == [("Yamada Taro", 4000)]
+    assert [(r.label, r.size) for r in views["files-agent"].rows] == [("helper (Yamada Taro)", 1000)]
+    assert [r.label for r in views["files-largest"].rows] == ["essay.txt", "chart.png"]
+    assert "Submission files · Methods · Yamada Taro" == views["files-largest"].rows[0].detail
+
+
+def test_pie_gives_six_colours_then_other(engine):
+    from usage import OTHER_COLOUR, SLICE_COLOURS, Row, View, finish
+
+    view = finish(View("x", "Test", [Row(f"item {n}", 100 - n) for n in range(9)]))
+    assert [s.colour for s in view.slices] == SLICE_COLOURS + [OTHER_COLOUR]
+    assert view.slices[-1].label == "Other (3)" and view.slices[-1].size == 94 + 93 + 92
+    assert abs(sum(s.share for s in view.slices) - 100) < 1e-9
+    assert all(s.path.startswith("M ") for s in view.slices)
+    whole = finish(View("y", "One", [Row("only", 5)]))  # a single slice is a whole ring
+    assert whole.slices[0].path.count("M ") == 2
+
+
+def test_database_breakdown_estimates_by_class_person_and_agent(engine, client, admin, make_person,
+                                                                create_class, create_agent):
+    from usage import database_breakdown
+    from test_agents import api
+
+    course = create_class(title="Methods", enrolled_gens=[9])
+    taro = make_person("student", "taro", "Yamada Taro", gen=9)
+    create_agent(taro, course, "helper")
+    client.post("/api/outputs", json={"category": "notes", "content": "z" * 500}, headers=api("helper"))
+    submit(taro, course, text="w" * 200)
+    with Session(engine) as db:
+        views = {view.key: view for view in database_breakdown(db)}
+    agent = dict((r.label, r.size) for r in views["db-agent"].rows)["helper (Yamada Taro)"]
+    assert agent >= 505  # the output's text and category, plus its activity line
+    person = dict((r.label, r.size) for r in views["db-person"].rows)["Yamada Taro"]
+    assert person >= agent + 200  # plus the text submission
+    assert "Estimated" in views["db-class"].note
+
+
+def test_breakdowns_are_for_admins_only(admin, make_person):
+    for part in ("files", "database"):
+        page = admin.get(f"/members/usage/{part}")
+        assert page.status_code == 200 and "<html" not in page.text
+    assert admin.get("/members/usage/other").status_code == 404
+    assert make_person("student").get("/members/usage/files").status_code == 403
+    assert make_person("guest").get("/members/usage/database").status_code == 403
+    assert 'hx-get="/members/usage/files"' in admin.get("/members").text

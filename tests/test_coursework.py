@@ -345,3 +345,11 @@ def test_guests_get_no_notification_marks(taro, make_person, course):
     guest = make_person("guest")
     submit(taro, course, guest_visible=True)
     assert NEW_MARK not in guest.get("/classes").text
+
+
+def test_supabase_keys_are_sent_the_way_each_kind_needs():
+    import storage
+
+    assert storage._headers("sb_secret_abc") == {"apikey": "sb_secret_abc"}  # new keys: apikey only
+    legacy = storage._headers("eyJhbGciOiJIUzI1NiJ9.x.y")  # old service_role keys are JWTs
+    assert legacy["Authorization"] == "Bearer eyJhbGciOiJIUzI1NiJ9.x.y" and legacy["apikey"].startswith("eyJ")

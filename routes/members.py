@@ -35,6 +35,7 @@ from security import (
     temporary_password,
 )
 from uploads import STORAGE_TOTAL_LIMIT, total_stored
+from usage import database_breakdown, file_breakdown
 from web import render
 
 router = APIRouter()
@@ -72,6 +73,19 @@ def get_member(db: Session, user_id: int) -> User:
 @router.get("/members")
 def members(request: Request, viewer: Viewer = Depends(require_admin), db: Session = Depends(get_session)):
     return members_page(request, db, viewer)
+
+
+@router.get("/members/usage/{part}")
+def usage_breakdown(request: Request, part: str, viewer: Viewer = Depends(require_admin),
+                    db: Session = Depends(get_session)):
+    """What takes up file storage ("files") or the database ("database"): pie charts and tables.
+
+    Loaded only when an admin opens a breakdown, so the Members page stays fast.
+    """
+    if part not in ("files", "database"):
+        raise not_found()
+    views = file_breakdown(db) if part == "files" else database_breakdown(db)
+    return render(request, db, viewer, "partials/usage.html", part=part, views=views)
 
 
 @router.post("/members/{user_id}/gen")
