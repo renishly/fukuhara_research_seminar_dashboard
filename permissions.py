@@ -61,6 +61,21 @@ def course_name(course: Course) -> str:
     return (course.title or "").strip() or timespan_label(course)
 
 
+def course_tabs(course: Course) -> list[str]:
+    """The class page's tabs: Assignments always; Exams and Agents if switched on."""
+    tabs = ["assignments"]
+    if course.has_exams:
+        tabs.append("exams")
+    if course.has_agents:
+        tabs.append("agents")
+    return tabs
+
+
+def kind_switched_on(course: Course, kind: str) -> bool:
+    """Assignments always exist; exams only in classes with an Exams tab."""
+    return kind == "assignment" or (kind == "exam" and course.has_exams)
+
+
 def gen_label(gen: Gen | None) -> str:
     return f"Gen {gen.number}" if gen else ""
 
@@ -179,7 +194,8 @@ def can_view_agent_page(db: Session, viewer: Viewer, agent: Agent) -> bool:
     """Members who can view the class see agent pages (read-only unless theirs).
     Guests only see the agent grid, never agent pages."""
     course = db.get(Course, agent.course_id)
-    return viewer.is_member and course is not None and can_view_course(db, viewer, course)
+    return (viewer.is_member and course is not None and course.has_agents
+            and can_view_course(db, viewer, course))
 
 
 # ---------------------------------------------------------------------------
@@ -190,17 +206,18 @@ def can_view_agent_page(db: Session, viewer: Viewer, agent: Agent) -> bool:
 def can_download_file(db: Session, viewer: Viewer, stored: StoredFile) -> bool:
     """May this viewer download this stored file? Decided by what the file belongs to."""
 
-    def course_ok(course_id: int) -> bool:
+    def course_ok(course_id: int, kind: str) -> bool:
+        # A switched-off Exams tab hides its files too (they come back if it's switched on again).
         course = db.get(Course, course_id)
-        return course is not None and can_view_course(db, viewer, course)
+        return course is not None and kind_switched_on(course, kind) and can_view_course(db, viewer, course)
 
     task = db.exec(select(Task).where(Task.file_id == stored.id)).first()
     if task is not None:
-        return course_ok(task.course_id) and can_see_task(viewer, task)
+        return course_ok(task.course_id, task.kind) and can_see_task(viewer, task)
 
     submission = db.exec(select(Submission).where(Submission.file_id == stored.id)).first()
     if submission is not None:
-        return course_ok(submission.course_id) and can_see_submission(viewer, submission)
+        return course_ok(submission.course_id, submission.kind) and can_see_submission(viewer, submission)
 
     output = db.exec(select(Output).where(Output.file_id == stored.id)).first()
     if output is not None:

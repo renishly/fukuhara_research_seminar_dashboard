@@ -8,6 +8,7 @@ refresh; switching tabs swaps only the content below the tab buttons (HTMX).
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, Request
+from sqlalchemy import or_
 from sqlmodel import Session, delete, func, select
 
 from db import (
@@ -29,6 +30,7 @@ from permissions import (
     MONTH_NAMES,
     can_manage_classes,
     can_submit,
+    course_tabs,
     enrolled_gen_ids,
     enrolled_user_ids,
     hidden_gen_ids,
@@ -42,6 +44,7 @@ from routes.common import (
     gens_by_id,
     get_course,
     kind_of,
+    not_found,
     student_groups,
     visible_submissions,
     visible_tasks,
@@ -52,7 +55,6 @@ from web import JST, clean_line, clean_text, form_error, hx_redirect, poll_reply
 
 router = APIRouter()
 
-TABS = ("assignments", "exams", "agents")
 MAX_TITLE = 200
 MAX_COURSE_DESCRIPTION = 5000
 POLL_SECONDS = 15
@@ -76,9 +78,12 @@ def classes_with_new_submissions(db: Session, viewer: Viewer, course_ids: list[i
     """
     if not viewer.is_member or not course_ids:
         return set()
+    # Exam submissions only count in classes whose Exams tab is switched on.
     newest = db.exec(
         select(Submission.course_id, func.max(Submission.created_at))
-        .where(Submission.course_id.in_(course_ids), Submission.student_id != viewer.id)
+        .join(Course, Course.id == Submission.course_id)
+        .where(Submission.course_id.in_(course_ids), Submission.student_id != viewer.id,
+               or_(Submission.kind == "assignment", Course.has_exams))
         .group_by(Submission.course_id)
     ).all()
     visits = {visit.course_id: visit.seen_at
@@ -158,13 +163,14 @@ def class_form_context(db: Session, course: Course | None, values: dict | None =
             start = today_jst().replace(day=1)
             values = {"title": "", "description": "", "start": start, "end": add_months(start, 5),
                       "enrolled_gens": set(), "enrolled_users": set(), "hidden_gens": set(),
-                      "hidden_users": set(), "hidden_from_guests": False}
+                      "hidden_users": set(), "hidden_from_guests": False, "has_exams": True, "has_agents": True}
         else:
             values = {"title": course.title or "", "description": course.description,
                       "start": course.start_month, "end": course.end_month,
                       "enrolled_gens": enrolled_gen_ids(db, course), "enrolled_users": enrolled_user_ids(db, course),
                       "hidden_gens": hidden_gen_ids(db, course), "hidden_users": hidden_user_ids(db, course),
-                      "hidden_from_guests": course.hidden_from_guests}
+                      "hidden_from_guests": course.hidden_from_guests,
+                      "has_exams": course.has_exams, "has_agents": course.has_agents}
     gens = list(db.exec(select(Gen).order_by(Gen.number.desc())).all())
     gen_numbers = {gen.id: gen.number for gen in gens}
     students = sorted(
@@ -197,7 +203,8 @@ def save_links(db: Session, course: Course, values: dict) -> None:
 
 
 def read_class_form(db: Session, title, description, start_month, start_year, end_month, end_year,
-                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests) -> tuple[dict, str | None]:
+                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
+                    has_exams, has_agents) -> tuple[dict, str | None]:
     """Tidy and check the class form. Returns (values, error or None)."""
     gen_ids = set(db.exec(select(Gen.id)).all())
     student_ids = set(db.exec(select(User.id).where(User.role == "student")).all())
@@ -210,6 +217,7 @@ def read_class_form(db: Session, title, description, start_month, start_year, en
         "hidden_gens": {g for g in hidden_gen if g in gen_ids},
         "hidden_users": {u for u in hidden_user if u in student_ids},
         "hidden_from_guests": hidden_from_guests,
+        "has_exams": has_exams, "has_agents": has_agents,
     }
     if error is None and len(values["title"]) > MAX_TITLE:
         error = f"The title can be at most {MAX_TITLE} characters."
@@ -242,16 +250,19 @@ def create_class(
     enrolled_gen: list[int] = Form([]), enrolled_user: list[int] = Form([]),
     hidden_gen: list[int] = Form([]), hidden_user: list[int] = Form([]),
     hidden_from_guests: bool = Form(False),
+    has_exams: bool = Form(False), has_agents: bool = Form(False),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
 ):
     values, error = read_class_form(db, title, description, start_month, start_year, end_month, end_year,
-                                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests)
+                                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
+                                    has_exams, has_agents)
     if error:
         return render(request, db, viewer, "partials/class_form.html", **class_form_context(db, None, values, error))
     course = Course(title=values["title"] or None, description=values["description"],
                     start_month=values["start"], end_month=values["end"],
-                    hidden_from_guests=values["hidden_from_guests"], created_by=viewer.id)
+                    hidden_from_guests=values["hidden_from_guests"], has_exams=values["has_exams"],
+                    has_agents=values["has_agents"], created_by=viewer.id)
     db.add(course)
     db.flush()
     save_links(db, course, values)
@@ -277,18 +288,23 @@ def edit_class(
     enrolled_gen: list[int] = Form([]), enrolled_user: list[int] = Form([]),
     hidden_gen: list[int] = Form([]), hidden_user: list[int] = Form([]),
     hidden_from_guests: bool = Form(False),
+    has_exams: bool = Form(False), has_agents: bool = Form(False),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
 ):
     course = get_course(db, viewer, course_id)
     values, error = read_class_form(db, title, description, start_month, start_year, end_month, end_year,
-                                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests)
+                                    enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
+                                    has_exams, has_agents)
     if error:
         return render(request, db, viewer, "partials/class_form.html", **class_form_context(db, course, values, error))
     course.title = values["title"] or None
     course.description = values["description"]
     course.start_month, course.end_month = values["start"], values["end"]
     course.hidden_from_guests = values["hidden_from_guests"]
+    # Switching a tab off only hides it; its exams, submissions and agents are
+    # kept and come back if it's switched on again.
+    course.has_exams, course.has_agents = values["has_exams"], values["has_agents"]
     db.add(course)
     save_links(db, course, values)
     db.commit()
@@ -353,11 +369,14 @@ def agents_window(db: Session, viewer: Viewer, course: Course) -> dict:
 
 
 def tab_context(db: Session, viewer: Viewer, course: Course, tab: str) -> dict:
-    context = {"course": course, "tab": tab, "can_manage": can_manage_classes(viewer),
+    """One tab's content (404 for a tab this class doesn't have)."""
+    if tab not in course_tabs(course):
+        raise not_found()
+    context = {"course": course, "tab": tab, "tabs": course_tabs(course), "can_manage": can_manage_classes(viewer),
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
     if tab == "agents":
         return context | agents_window(db, viewer, course)
-    kind = kind_of(tab)
+    kind = kind_of(tab, course)
     return context | {"kind": kind} | coursework_window(db, viewer, course, kind)
 
 
@@ -366,7 +385,7 @@ def class_page(request: Request, course_id: int, tab: str = "assignments",
                viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
     mark_class_seen(db, viewer, course)
-    tab = tab if tab in TABS else "assignments"
+    tab = tab if tab in course_tabs(course) else "assignments"
     return render(request, db, viewer, "class.html", summary=enrolment_summary(db, course),
                   ended=month_number(course.end_month) < month_number(today_jst()),
                   **tab_context(db, viewer, course, tab))
@@ -377,7 +396,7 @@ def tab_fragment(request: Request, course_id: int, tab: str, viewer: Viewer = De
                  db: Session = Depends(get_session)):
     """Just one tab's content (the tab buttons swap it in with HTMX)."""
     course = get_course(db, viewer, course_id)
-    if tab not in TABS:
+    if tab not in course_tabs(course):
         tab = "assignments"
     return render(request, db, viewer, "partials/tab.html", **tab_context(db, viewer, course, tab))
 
@@ -387,6 +406,7 @@ def bar_fragment(course_id: int, kinds: str, seen: str | None = None,
                  viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     """The bar again, every 15 seconds (204 when nothing changed)."""
     course = get_course(db, viewer, course_id)
+    kind_of(kinds, course)  # only Assignments and (if switched on) Exams have a bar
     content = render_text(db, viewer, "partials/bar.html", **tab_context(db, viewer, course, kinds))
     return poll_reply(content, seen, f"bar-seen-{kinds}")
 
@@ -396,8 +416,6 @@ def window_fragment(course_id: int, tab: str, seen: str | None = None,
                     viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     """The student window again, every 15 seconds (204 when nothing changed)."""
     course = get_course(db, viewer, course_id)
-    if tab not in TABS:
-        tab = "assignments"
     content = render_text(db, viewer, "partials/student_window.html", **tab_context(db, viewer, course, tab))
     return poll_reply(content, seen, f"window-seen-{tab}")
 

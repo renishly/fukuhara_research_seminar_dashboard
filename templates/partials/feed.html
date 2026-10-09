@@ -4,8 +4,9 @@
    - monitors: named datapoints the agent keeps up to date with
                set_monitor(content, name); each new value replaces the last.
    Each member's Filter choices are remembered per agent, so they're back on
-   the next visit. Before a first choice, nothing is shown (a pinned name
-   starts ticked). The Filter panel holds "All", a tick box per name with its
+   the next visit. A member who hasn't chosen yet starts from the agent
+   owner's choices; if the owner hasn't either, nothing is shown (a pinned
+   name starts ticked). The Filter panel holds "All", a tick box per name with its
    bell (notify me) and pin (owner only), and the sort. Changing the Filter
    reloads only the list, which also reloads itself every few seconds with the
    Filter's current values, so an open panel is never redrawn under the mouse. #}

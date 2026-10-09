@@ -152,13 +152,18 @@ def guest(make_person):
 
 def class_form(engine, title="Research Methods", description="Line one\nLine two\nLine three",
                start=(4, 2026), end=(9, 2026), enrolled_gens=(), enrolled_users=(), hidden_gens=(),
-               hidden_users=(), hidden_from_guests=False) -> dict:
+               hidden_users=(), hidden_from_guests=False, has_exams=True, has_agents=True) -> dict:
     data = {"title": title, "description": description, "start_month": start[0], "start_year": start[1],
             "end_month": end[0], "end_year": end[1],
             "enrolled_gen": [_gen_id(engine, n) for n in enrolled_gens], "enrolled_user": list(enrolled_users),
             "hidden_gen": [_gen_id(engine, n) for n in hidden_gens], "hidden_user": list(hidden_users)}
     if hidden_from_guests:
         data["hidden_from_guests"] = "true"
+    # Like the form: a ticked box sends "true", an unticked one sends nothing.
+    if has_exams:
+        data["has_exams"] = "true"
+    if has_agents:
+        data["has_agents"] = "true"
     return data
 
 

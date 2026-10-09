@@ -50,7 +50,7 @@ RECENT_TASKS_IN_DROPDOWN = 5
 def history_page(request: Request, course_id: int, kinds: str, viewer: Viewer = Depends(current_viewer),
                  db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
-    kind = kind_of(kinds)
+    kind = kind_of(kinds, course)
     tasks = visible_tasks(db, viewer, course, kind)
     submissions = visible_submissions(db, viewer, course, kind)
     students = {u.id: u for u in db.exec(select(User)).all()}
@@ -110,7 +110,7 @@ def read_task_form(title, description, due_at, mode, content_text, guest_visible
 def new_task_form(request: Request, course_id: int, kinds: str, viewer: Viewer = Depends(require_admin),
                   db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
-    return task_form(request, db, viewer, course, kind_of(kinds))
+    return task_form(request, db, viewer, course, kind_of(kinds, course))
 
 
 @router.post("/classes/{course_id}/{kinds}")
@@ -129,7 +129,7 @@ def create_task(
     db: Session = Depends(get_session),
 ):
     course = get_course(db, viewer, course_id)
-    kind = kind_of(kinds)
+    kind = kind_of(kinds, course)
     values, due, error = read_task_form(title, description, due_at, mode, content_text, guest_visible)
     if error is None and values["mode"] == "text" and not values["content_text"]:
         error = "Write the content, or switch to a file."
@@ -157,7 +157,8 @@ def get_task(db: Session, viewer: Viewer, task_id: int) -> Task:
     task = db.get(Task, task_id)
     if task is None:
         raise not_found("Not found")
-    get_course(db, viewer, task.course_id)  # 404 if the class can't be seen
+    course = get_course(db, viewer, task.course_id)  # 404 if the class can't be seen
+    kind_of(plural(task.kind), course)  # ...or if its Exams tab is switched off
     return task
 
 
@@ -234,7 +235,7 @@ def remove_task(task_id: int, viewer: Viewer = Depends(checked_admin),
 def student_history(request: Request, course_id: int, kinds: str, student_id: int,
                     viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
-    kind = kind_of(kinds)
+    kind = kind_of(kinds, course)
     student = db.get(User, student_id)
     if student is None or student.role != "student":
         raise not_found("Student not found")
@@ -304,7 +305,7 @@ def own_course(db: Session, viewer: Viewer, course_id: int):
 def new_submission_form(request: Request, course_id: int, kinds: str, viewer: Viewer = Depends(require_member),
                         db: Session = Depends(get_session)):
     course = own_course(db, viewer, course_id)
-    return submission_form(request, db, viewer, course, kind_of(kinds))
+    return submission_form(request, db, viewer, course, kind_of(kinds, course))
 
 
 @router.post("/classes/{course_id}/{kinds}/submissions")
@@ -323,7 +324,7 @@ def create_submission(
     db: Session = Depends(get_session),
 ):
     course = own_course(db, viewer, course_id)
-    kind = kind_of(kinds)
+    kind = kind_of(kinds, course)
     values, error = read_submission_form(db, course, kind, title, description, task_id, mode, content_text,
                                          guest_visible)
     if error is None and values["mode"] == "text" and not values["content_text"]:
@@ -353,7 +354,8 @@ def get_submission(db: Session, viewer: Viewer, submission_id: int) -> Submissio
     submission = db.get(Submission, submission_id)
     if submission is None or not can_see_submission(viewer, submission):
         raise not_found("Submission not found")
-    get_course(db, viewer, submission.course_id)
+    course = get_course(db, viewer, submission.course_id)
+    kind_of(plural(submission.kind), course)  # 404 if its Exams tab is switched off
     return submission
 
 

@@ -35,7 +35,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
   - **monitors** are named datapoints the agent keeps up to date, each new value replacing the last (`set_monitor(content, name)`): a count, a status, the latest summary PDF, a link to a live sheet;
   - **activity** is its log of status lines.
 
-  Monitors and outputs have the same Filter on the agent's page (choose what to show, sort, a bell per name); each member's choices are remembered per agent. One of them can be pinned to the agent's card.
+  Monitors and outputs have the same Filter on the agent's page (choose what to show, sort, a bell per name); each member's choices are remembered per agent, and the owner's choices are the starting point for anyone who hasn't chosen. One of them can be pinned to the agent's card.
 - **The database** holds accounts, classes, assignments, submissions and agent data. **Files** (assignment files, submissions, agent outputs, Inbox files) are kept in file storage, never in the database, because Supabase's free database is small.
 
 ### The files
@@ -67,7 +67,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 |---|---|---|---|
 | Sign in | Login ID + password | Login ID + password | "Continue as guest", no details |
 | See classes | All | All, except ones hidden from them (enrolled classes are always visible) | All not marked "Hidden from guests" |
-| Create, edit, delete classes, assignments, exams | ✓ | | |
+| Create, edit, delete classes, assignments, exams (and choose each class's tabs: Assignments always, Exams and Agents optional) | ✓ | | |
 | Submit in a class | | When enrolled; only their own submissions | |
 | Delete any submission (moderation) | ✓ | Own only | |
 | See submissions and their files | ✓ | ✓ | Only ones ticked "Visible to guests" |

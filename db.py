@@ -111,6 +111,10 @@ class Course(SQLModel, table=True):
     start_month: date  # always the 1st day of the month
     end_month: date  # always the 1st day of the month, never before start_month
     hidden_from_guests: bool = False
+    # Which tabs the class has besides Assignments (which every class has).
+    # Classes from before these existed get True, i.e. all three tabs.
+    has_exams: bool = True
+    has_agents: bool = True
     created_by: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=utc_now)
 

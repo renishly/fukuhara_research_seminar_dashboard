@@ -35,7 +35,14 @@ from db import (
     Task,
     User,
 )
-from permissions import KINDS, can_see_submission, can_see_task, can_view_course, enrolled_students
+from permissions import (
+    KINDS,
+    can_see_submission,
+    can_see_task,
+    can_view_course,
+    enrolled_students,
+    kind_switched_on,
+)
 from security import Viewer
 from uploads import delete_stored_file
 
@@ -53,9 +60,12 @@ def get_course(db: Session, viewer: Viewer, course_id: int) -> Course:
     return course
 
 
-def kind_of(kinds: str) -> str:
-    """ "assignments" -> "assignment", "exams" -> "exam" (404 for anything else)."""
-    if kinds not in KINDS:
+def kind_of(kinds: str, course: Course | None = None) -> str:
+    """ "assignments" -> "assignment", "exams" -> "exam" (404 for anything else).
+
+    With a class: also 404 for exams when that class has no Exams tab.
+    """
+    if kinds not in KINDS or (course is not None and not kind_switched_on(course, KINDS[kinds])):
         raise not_found()
     return KINDS[kinds]
 

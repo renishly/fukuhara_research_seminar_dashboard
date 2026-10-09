@@ -4,7 +4,8 @@
 <section id="tab-area" class="space-y-6">
   <div class="flex justify-center">
     <div class="join" role="tablist">
-      {% for name in ("assignments", "exams", "agents") %}
+      {# Assignments always; Exams and Agents only if the class has them switched on. #}
+      {% for name in tabs %}
       <a role="tab" href="/classes/{{ course.id }}?tab={{ name }}" aria-selected="{{ 'true' if name == tab else 'false' }}"
          class="join-item btn {{ 'btn-primary' if name == tab else '' }}"
          hx-get="/classes/{{ course.id }}/tab/{{ name }}" hx-target="#tab-area" hx-swap="outerHTML"

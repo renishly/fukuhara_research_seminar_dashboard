@@ -727,9 +727,13 @@ def test_filter_choices_are_remembered_per_member_agent_and_feed(engine, client,
     page = taro.get(f"/agents/{agent_id}").text
     assert "Headline" in page and "All good" in page  # ...so it's all back on the next visit
     assert '<option value="name" selected>' in page
-    # ...for that member only.
+    # Other members who haven't chosen anything start from the owner's choices...
     other = hanako.get(f"/agents/{agent_id}").text
-    assert "Headline" not in other and "All good" not in other
+    assert "Headline" in other and "All good" in other
+    # ...until they choose for themselves, which doesn't change the owner's.
+    hanako.get(f"/agents/{agent_id}/outputs", params={"c": "stats", "sort": "date", "order": "desc"})
+    assert "Headline" not in hanako.get(f"/agents/{agent_id}").text
+    assert "Headline" in taro.get(f"/agents/{agent_id}").text
     # Unticking everything is remembered too.
     taro.get(f"/agents/{agent_id}/outputs", params={"sort": "date", "order": "desc"})
     assert "Headline" not in taro.get(f"/agents/{agent_id}").text
@@ -745,3 +749,12 @@ def test_background_refreshes_without_the_filter_change_nothing(engine, client, 
     taro.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "date", "order": "desc"})  # same choices
     taro.get(f"/agents/{agent_id}/outputs", params={"known": "news"})  # no Filter values at all
     assert rows(engine, FeedFilter)[0].updated_at == saved and rows(engine, FeedFilter)[0].selected == ["news"]
+
+
+
+def test_a_non_owners_choices_are_not_a_preset_for_others(client, taro, hanako, make_person, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    client.post("/api/outputs", json={"category": "news", "content": "Headline"}, headers=api("helper"))
+    hanako.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "date", "order": "desc"})
+    third = make_person("student", "jiro", gen=9)
+    assert "Headline" not in third.get(f"/agents/{agent_id}").text  # only the owner's choices are a preset

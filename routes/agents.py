@@ -130,7 +130,10 @@ def own_folder(db: Session, viewer: Viewer, folder_id: int) -> Folder:
 
 
 def dashboard_owner(db: Session, viewer: Viewer, course: Course, student_id: int) -> User:
-    """The student whose agent dashboard this is (they must be enrolled)."""
+    """The student whose agent dashboard this is (they must be enrolled, and
+    the class must have its Agents tab switched on)."""
+    if not course.has_agents:
+        raise not_found("This class has no Agents tab")
     student = db.get(User, student_id)
     if student is None or not student_is_enrolled(db, student, course):
         raise not_found("Student not found")
@@ -299,6 +302,8 @@ def create_agent(
 ):
     """Add an agent from the "Add Agent" card. A blank key means one is generated."""
     course = get_course(db, viewer, course_id)
+    if not course.has_agents:
+        raise not_found("This class has no Agents tab")
     if not can_submit(db, viewer, course):
         raise forbidden("Only students enrolled in this class can add agents here.")
     name, error = clean_name(name, MAX_AGENT_NAME)
@@ -476,8 +481,13 @@ def feed_context(db: Session, viewer: Viewer, agent: Agent, section: str, select
 
 def saved_feed(db: Session, viewer: Viewer, agent: Agent, section: str) -> dict:
     """A feed with the Filter choices this member last made for this agent.
-    Never chosen before: nothing ticked, except the pinned name."""
-    saved = db.get(FeedFilter, (viewer.id, agent.id, section))
+
+    A member who hasn't chosen anything yet sees the agent owner's choices
+    (the owner's "preset"), so a page starts the way its owner arranged it.
+    If neither has chosen: nothing ticked, except the pinned name.
+    """
+    saved = (db.get(FeedFilter, (viewer.id, agent.id, section))
+             or db.get(FeedFilter, (agent.owner_id, agent.id, section)))
     if saved is None:
         return feed_context(db, viewer, agent, section)
     return feed_context(db, viewer, agent, section, list(saved.selected or []), saved.show_all, saved.sort,

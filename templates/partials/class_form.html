@@ -70,6 +70,22 @@
     </div>
   </fieldset>
 
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Tabs</legend>
+    <div class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+      <label class="flex items-center gap-2 opacity-70" title="Every class has assignments">
+        <input type="checkbox" checked disabled class="checkbox checkbox-sm"> Assignments
+      </label>
+      <label class="flex cursor-pointer items-center gap-2">
+        <input type="checkbox" name="has_exams" value="true" class="checkbox checkbox-sm" {{ 'checked' if v.has_exams }}> Exams
+      </label>
+      <label class="flex cursor-pointer items-center gap-2">
+        <input type="checkbox" name="has_agents" value="true" class="checkbox checkbox-sm" {{ 'checked' if v.has_agents }}> Agents
+      </label>
+    </div>
+    <p class="label whitespace-normal">Switching a tab off later only hides it: its exams, submissions and agents are kept, and come back if you switch it on again.</p>
+  </fieldset>
+
   <div class="grid gap-4 md:grid-cols-2">
     <fieldset class="fieldset">
       <legend class="fieldset-legend">Enrolled</legend>

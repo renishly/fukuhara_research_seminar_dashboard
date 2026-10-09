@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from sqlmodel import Session, select
 
 from conftest import class_form
-from db import Course, CourseEnrolledGen
+from db import Course, CourseEnrolledGen, StoredFile
 from permissions import course_name, timespan_label
 from timeline import DAY_MARGIN, MIN_BOX_WIDTH, ZOOM_LEVELS, assign_lanes, build_timeline
 from web import jst, parse_jst_input, relative_time
@@ -227,3 +227,93 @@ def test_html_in_class_text_is_escaped(admin, create_class):
     page = admin.get(f"/classes/{course}").text
     assert "<script>alert(1)</script>" not in page and "<img src=x" not in page
     assert html.escape("<script>alert(1)</script>") in page
+
+
+# --- Optional Exams and Agents tabs ---------------------------------------------------------
+
+
+def tab_buttons(page: str) -> list[str]:
+    return re.findall(r'hx-get="/classes/\d+/tab/(\w+)"', page)
+
+
+def test_classes_have_the_tabs_ticked_at_creation(make_person, create_class):
+    student = make_person("student", "taro", gen=9)
+    all_three = create_class(title="All", enrolled_gens=[9])
+    no_exams = create_class(title="No exams", enrolled_gens=[9], has_exams=False)
+    only_assignments = create_class(title="Only assignments", enrolled_gens=[9], has_exams=False, has_agents=False)
+    assert tab_buttons(student.get(f"/classes/{all_three}").text) == ["assignments", "exams", "agents"]
+    assert tab_buttons(student.get(f"/classes/{no_exams}").text) == ["assignments", "agents"]
+    assert tab_buttons(student.get(f"/classes/{only_assignments}").text) == ["assignments"]
+
+
+def test_switched_off_tabs_and_their_pages_are_not_found(make_person, create_class):
+    from test_coursework import submit
+
+    student = make_person("student", "taro", gen=9)
+    course = create_class(enrolled_gens=[9], has_exams=False, has_agents=False)
+    for url in (f"/classes/{course}/exams", f"/classes/{course}/window/exams", f"/classes/{course}/bar/exams",
+                f"/classes/{course}/exams/students/{student.id}", f"/classes/{course}/exams/submissions/new",
+                f"/classes/{course}/window/agents", f"/classes/{course}/agents/{student.id}"):
+        assert student.get(url).status_code == 404, url
+    assert "Assignments" in student.get(f"/classes/{course}?tab=exams").text  # falls back to Assignments
+    assert submit(student, course, "exams").status_code == 404
+    assert student.post(f"/classes/{course}/agents", data={"name": "bot"}).status_code == 404
+    assert submit(student, course).status_code == 200  # assignments always work
+
+
+def test_switching_a_tab_off_hides_its_data_and_on_brings_it_back(engine, admin, client, make_person, create_class,
+                                                                 create_agent):
+    from test_coursework import post_task, submit
+    from test_agents import api
+
+    student = make_person("student", "taro", gen=9)
+    course = create_class(title="Flexible", enrolled_gens=[9])
+    post_task(admin, course, "exams", title="Midterm", file=("exam.pdf", b"%PDF-1.4 exam", "application/pdf"))
+    submit(student, course, "exams", title="My exam answers")
+    agent = create_agent(student, course, "helper")
+    with Session(engine) as db:
+        exam_file = db.exec(select(StoredFile).where(StoredFile.filename == "exam.pdf")).one().id
+    admin.post(f"/classes/{course}/edit", data=class_form(engine, title="Flexible", enrolled_gens=[9],
+                                                          has_exams=False, has_agents=False))
+    assert tab_buttons(student.get(f"/classes/{course}").text) == ["assignments"]
+    assert student.get(f"/files/{exam_file}").status_code == 404
+    assert student.get(f"/agents/{agent}").status_code == 404
+    assert client.post("/api/state", json={}, headers=api("helper")).status_code == 200  # the agent itself still runs
+    admin.post(f"/classes/{course}/edit", data=class_form(engine, title="Flexible", enrolled_gens=[9]))
+    assert "My exam answers" in student.get(f"/classes/{course}/exams/students/{student.id}").text  # all back
+    assert student.get(f"/files/{exam_file}").status_code == 200
+    assert student.get(f"/agents/{agent}").status_code == 200
+
+
+def test_the_class_form_has_the_tabs_ticked_by_default(admin):
+    form = admin.get("/classes/new").text
+    assert 'name="has_exams" value="true" class="checkbox checkbox-sm" checked' in form
+    assert 'name="has_agents" value="true" class="checkbox checkbox-sm" checked' in form
+
+
+def test_existing_classes_get_all_three_tabs(engine):
+    # Classes created before the switches existed get the column's default: on.
+    with engine.begin() as connection:
+        connection.exec_driver_sql('ALTER TABLE "course" RENAME TO "course_new"')
+        connection.exec_driver_sql(
+            'CREATE TABLE "course" (id INTEGER PRIMARY KEY, title VARCHAR, description VARCHAR, start_month DATE, '
+            'end_month DATE, hidden_from_guests BOOLEAN, created_by INTEGER, created_at DATETIME)')
+        connection.exec_driver_sql("INSERT INTO course (id, description, start_month, end_month, hidden_from_guests, "
+                                   "created_at) VALUES (1, 'Old', '2026-04-01', '2026-09-01', 0, '2026-01-01')")
+    from db import add_missing_columns
+    assert {"course.has_exams", "course.has_agents"} <= set(add_missing_columns(engine))
+    with engine.begin() as connection:
+        assert tuple(connection.exec_driver_sql("SELECT has_exams, has_agents FROM course").one()) == (1, 1)
+
+
+def test_hidden_exam_submissions_dont_mark_the_class_as_new(engine, admin, make_person, create_class):
+    from test_coursework import submit
+
+    course = create_class(enrolled_gens=[9])
+    student = make_person("student", "taro", gen=9)
+    admin.get(f"/classes/{course}")  # seen
+    submit(student, course, "exams")
+    admin.post(f"/classes/{course}/edit", data=class_form(engine, enrolled_gens=[9], has_exams=False))
+    assert 'class="tl-new"' not in admin.get("/classes").text  # the exam submission is hidden
+    admin.post(f"/classes/{course}/edit", data=class_form(engine, enrolled_gens=[9]))
+    assert 'class="tl-new"' in admin.get("/classes").text  # and counts again once Exams is back
