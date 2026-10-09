@@ -24,6 +24,7 @@ from db import (
     CourseHiddenGen,
     CourseHiddenUser,
     Event,
+    FeedFilter,
     Gen,
     InboxFile,
     Monitor,
@@ -164,7 +165,7 @@ def delete_agent(db: Session, agent: Agent) -> None:
         db.delete(item)
         db.flush()
         delete_stored_file(db, file_id)
-    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting):
+    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter):
         db.exec(delete(model).where(model.agent_id == agent.id))
     db.delete(agent)
 

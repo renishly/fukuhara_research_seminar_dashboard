@@ -35,7 +35,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
   - **monitors** are named datapoints the agent keeps up to date, each new value replacing the last (`set_monitor(content, name)`): a count, a status, the latest summary PDF, a link to a live sheet;
   - **activity** is its log of status lines.
 
-  Monitors and outputs have the same Filter on the agent's page (choose what to show, sort, a bell per name), and one of them can be pinned to the agent's card.
+  Monitors and outputs have the same Filter on the agent's page (choose what to show, sort, a bell per name); each member's choices are remembered per agent. One of them can be pinned to the agent's card.
 - **The database** holds accounts, classes, assignments, submissions and agent data. **Files** (assignment files, submissions, agent outputs, Inbox files) are kept in file storage, never in the database, because Supabase's free database is small.
 
 ### The files
@@ -271,7 +271,7 @@ On the service's page in Render: **Settings** → **Custom Domains** → **Add C
 ## Warnings: free plans and guests
 
 - **Render's free service sleeps** after about 15 minutes without visits. The next visit takes **about a minute** to wake it up. Agents' connectors wait and keep their outputs in an offline buffer meanwhile.
-- **Supabase's free plan** has a **500 MB database** and **1 GB of file storage**, with uploads of up to 50 MB. The **Members** page shows how much of each is used, and **Show breakdown** under each bar shows what is taking up the space, as a pie chart and a table: files by type, class, person and agent, plus the largest files; the database by table (exact, on Supabase) and by class, person and agent (estimated from the text stored).
+- **Supabase's free plan** has a **500 MB database** and **1 GB of file storage**, with uploads of up to 50 MB. The **Members** page shows how much of each is used, where files are kept and whether that connection works right now (also written to the Logs tab at every start), and **Show breakdown** under each bar shows what is taking up the space, as a pie chart and a table: files by type, class, person and agent, plus the largest files; the database by table (exact, on Supabase) and by class, person and agent (estimated from the text stored).
   - **Files:** the site refuses new uploads above 900 MB, with a message asking people to tell an admin. Nothing else is affected.
   - **Database:** files never go in it, so it holds only text and grows slowly. To keep one busy agent from filling it, each agent keeps only its newest **1,000 outputs** and **2,000 Activity lines** (older ones, and their files, are deleted automatically; change `MAX_OUTPUTS_PER_AGENT` and `MAX_EVENTS_PER_AGENT` in `routes/agent_tools.py`). If the database does reach 500 MB, Supabase makes it read-only: pages still load, but nothing can be saved, not even sign-ins. People then see a message saying the database is full instead of an error, and agents' connectors keep their outputs in their offline buffer. Free space by deleting old classes or agents, or move to a paid Supabase plan.
 - **Free Supabase projects pause** after about **a week without activity** (for example over a semester break). The site then can't reach its database. Restore the project from the Supabase dashboard (it takes a few minutes).

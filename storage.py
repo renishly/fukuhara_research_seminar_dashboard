@@ -34,9 +34,24 @@ class StorageError(Exception):
     """File storage couldn't be reached or refused the request."""
 
 
+class FileMissing(StorageError):
+    """The file isn't in file storage (any more)."""
+
+
+def _project_url(raw: str) -> str:
+    """The project's base address, e.g. https://abcd.supabase.co. People often
+    copy a longer address from Supabase's pages (ending in /rest/v1 or
+    /storage/v1), so those endings are removed."""
+    url = raw.strip().rstrip("/")
+    for ending in ("/rest/v1", "/storage/v1", "/auth/v1"):
+        if url.endswith(ending):
+            url = url[: -len(ending)]
+    return url
+
+
 def _supabase() -> tuple[str, str, str] | None:
     """(url, service key, bucket) when Supabase Storage is configured, else None."""
-    url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+    url = _project_url(os.getenv("SUPABASE_URL") or "")
     key = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
     if not url or not key:
         return None
@@ -65,6 +80,65 @@ def local_dir() -> Path:
 
 def using_supabase() -> bool:
     return _supabase() is not None
+
+
+def on_render() -> bool:
+    """True on Render, which sets RENDER=true for every service."""
+    return (os.getenv("RENDER") or "").lower() == "true"
+
+
+def _refusal(what: str, response: requests.Response) -> StorageError:
+    """An error that says why Supabase refused, using its own message, e.g.
+    'File storage refused the upload (HTTP 404: Bucket not found).'"""
+    detail = ""
+    try:
+        body = response.json()
+        detail = str(body.get("message") or body.get("error") or "")[:200]
+    except ValueError:
+        detail = response.text[:200]
+    reason = f"HTTP {response.status_code}" + (f": {detail}" if detail else "")
+    print(f"Storage: Supabase refused the {what} ({reason})")
+    return StorageError(f"File storage refused the {what} ({reason}). Please tell an admin.")
+
+
+def check() -> dict:
+    """Where files are kept, and whether that works, for the Members page.
+
+    Returns {"where": ..., "ok": True/False, "message": ...}. With Supabase,
+    it asks for the bucket, which checks the address, the key and the
+    bucket's name all at once (and changes nothing).
+    """
+    supabase = _supabase()
+    if supabase is None:
+        if on_render():
+            return {"where": "this server's own disk", "ok": False,
+                    "message": "SUPABASE_URL and SUPABASE_SERVICE_KEY aren't both set on Render, so files are "
+                               "saved on the server's temporary disk and are lost whenever it restarts or sleeps. "
+                               "Set them in the service's Environment tab."}
+        return {"where": f"the local folder {local_dir()}", "ok": True, "message": "Files are kept on this computer."}
+    url, key, bucket = supabase
+    where = f"the Supabase bucket \"{bucket}\" at {url}"
+    try:
+        response = requests.get(f"{url}/storage/v1/bucket/{bucket}", headers=_headers(key), timeout=15)
+    except requests.RequestException as error:
+        return {"where": where, "ok": False, "message": f"Supabase couldn't be reached: {error}"}
+    if response.ok:
+        public = response.json().get("public") if "json" in response.headers.get("content-type", "") else None
+        if public:
+            return {"where": where, "ok": False,
+                    "message": "Connected, but the bucket is PUBLIC: anyone with a file's address could read it. "
+                               "Make it private in Supabase (Storage, bucket settings)."}
+        return {"where": where, "ok": True, "message": "Connected: the address, key and bucket all work."}
+    return {"where": where, "ok": False, "message": str(_refusal("connection check", response))
+            .replace(" Please tell an admin.", "") + _hint(response.status_code)}
+
+
+def _hint(status: int) -> str:
+    if status in (400, 404):
+        return " Check that the bucket exists and is named exactly as SUPABASE_BUCKET says."
+    if status in (401, 403):
+        return " Check SUPABASE_SERVICE_KEY: it must be the secret (service_role or sb_secret_) key, not the publishable/anon one."
+    return ""
 
 
 def new_path() -> str:
@@ -107,7 +181,7 @@ def save(file: BinaryIO, content_type: str = "application/octet-stream") -> str:
     except requests.RequestException as error:
         raise StorageError(f"File storage couldn't be reached: {error}") from error
     if not response.ok:
-        raise StorageError(f"File storage refused the upload (HTTP {response.status_code}).")
+        raise _refusal("upload", response)
     return path
 
 
@@ -119,7 +193,11 @@ def open(path: str) -> Iterator[bytes]:  # noqa: A001 - "open" reads naturally h
     """
     supabase = _supabase()
     if supabase is None:
-        with (local_dir() / path).open("rb") as handle:
+        try:
+            handle = (local_dir() / path).open("rb")
+        except FileNotFoundError:
+            raise FileMissing("This file is missing from file storage.") from None
+        with handle:
             while piece := handle.read(CHUNK_BYTES):
                 yield piece
         return
@@ -134,8 +212,10 @@ def open(path: str) -> Iterator[bytes]:  # noqa: A001 - "open" reads naturally h
         )
     except requests.RequestException as error:
         raise StorageError(f"File storage couldn't be reached: {error}") from error
+    if response.status_code in (400, 404):
+        raise FileMissing("This file is missing from file storage.")
     if not response.ok:
-        raise StorageError(f"File storage couldn't find the file (HTTP {response.status_code}).")
+        raise _refusal("download", response)
     with response:
         yield from response.iter_content(chunk_size=CHUNK_BYTES)
 

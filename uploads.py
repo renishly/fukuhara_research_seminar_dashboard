@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, func, select
 
@@ -104,6 +104,27 @@ def delete_stored_file(db: Session, file_id: int | None) -> None:
     db.delete(stored)
 
 
+def _pieces(stored: StoredFile):
+    """The file's bytes, a piece at a time. The first piece is fetched before
+    the reply starts, so a missing file (or a storage problem) becomes a clear
+    error message instead of a download that breaks halfway."""
+    pieces = storage.open(stored.storage_path)
+    try:
+        first = next(pieces, b"")
+    except storage.FileMissing:
+        raise HTTPException(404, f"{stored.filename} is missing from file storage. It may have been lost "
+                                 "before file storage was set up; ask its owner to upload it again.")
+    except storage.StorageError as error:
+        raise HTTPException(502, str(error))
+
+    def stream():
+        if first:
+            yield first
+        yield from pieces
+
+    return stream()
+
+
 def file_response(stored: StoredFile, inline: bool | None = None, filename: str | None = None,
                   media_type: str | None = None, cache: str = "private, no-cache") -> StreamingResponse:
     """Send a stored file to the browser, streamed from storage.
@@ -118,7 +139,7 @@ def file_response(stored: StoredFile, inline: bool | None = None, filename: str 
         media_type = stored.content_type if inline else "application/octet-stream"
     name = filename or stored.filename
     return StreamingResponse(
-        storage.open(stored.storage_path),
+        _pieces(stored),
         media_type=media_type,
         headers={
             # filename*= safely carries any file name, including spaces and Japanese.

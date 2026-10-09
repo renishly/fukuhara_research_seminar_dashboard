@@ -345,6 +345,20 @@ class MonitorNotifySetting(SQLModel, table=True):
     name: str = Field(primary_key=True)
 
 
+class FeedFilter(SQLModel, table=True):
+    """What a member last chose in an agent's Outputs or Monitors Filter, so
+    the same choices are back the next time they open that agent's page."""
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", primary_key=True)
+    section: str = Field(primary_key=True)  # "outputs" or "monitors"
+    selected: list[str] = Field(default_factory=list, sa_column=Column(JSON))  # the ticked names
+    show_all: bool = False
+    sort: str = "date"
+    order: str = "desc"
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class InboxFile(SQLModel, table=True):
     """A file the owner uploaded for one agent, waiting until the agent takes it."""
 

@@ -353,3 +353,114 @@ def test_supabase_keys_are_sent_the_way_each_kind_needs():
     assert storage._headers("sb_secret_abc") == {"apikey": "sb_secret_abc"}  # new keys: apikey only
     legacy = storage._headers("eyJhbGciOiJIUzI1NiJ9.x.y")  # old service_role keys are JWTs
     assert legacy["Authorization"] == "Bearer eyJhbGciOiJIUzI1NiJ9.x.y" and legacy["apikey"].startswith("eyJ")
+
+
+# --- Supabase Storage, against a stand-in server --------------------------------------------
+
+
+@pytest.fixture
+def fake_supabase(monkeypatch):
+    """A tiny stand-in for Supabase Storage's REST API, recording every request."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    state = {"objects": {}, "requests": [], "bucket": "seminar-files", "key": "sb_secret_test"}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self, status, body=b"", kind="application/json"):
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def allowed(self):
+            state["requests"].append((self.command, self.path, dict(self.headers)))
+            if self.headers.get("apikey") != state["key"] or "Authorization" in self.headers:
+                self.reply(401, json.dumps({"message": "Invalid API key"}).encode())
+                return False
+            return True
+
+        def do_GET(self):
+            if not self.allowed():
+                return
+            if self.path == f"/storage/v1/bucket/{state['bucket']}":
+                return self.reply(200, json.dumps({"name": state["bucket"], "public": False}).encode())
+            if self.path.startswith("/storage/v1/bucket/"):
+                return self.reply(404, json.dumps({"message": "Bucket not found"}).encode())
+            data = state["objects"].get(self.path.removeprefix(f"/storage/v1/object/{state['bucket']}/"))
+            if data is None:
+                return self.reply(400, json.dumps({"message": "Object not found"}).encode())
+            self.reply(200, data, "application/octet-stream")
+
+        def do_POST(self):
+            if not self.allowed():
+                return
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            state["objects"][self.path.removeprefix(f"/storage/v1/object/{state['bucket']}/")] = body
+            self.reply(200, json.dumps({"Key": self.path}).encode())
+
+        def do_DELETE(self):
+            if not self.allowed():
+                return
+            for path in json.loads(self.rfile.read(int(self.headers["Content-Length"])))["prefixes"]:
+                state["objects"].pop(path, None)
+            self.reply(200, b"[]")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # People often paste the longer address; it should still work.
+    monkeypatch.setenv("SUPABASE_URL", f"http://127.0.0.1:{server.server_port}/rest/v1/")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", state["key"])
+    yield state
+    server.shutdown()
+
+
+def test_files_go_to_supabase_storage_and_back(engine, admin, taro, course, fake_supabase):
+    import storage
+
+    assert storage.check()["ok"] is True
+    data = os.urandom(3 * 1024 * 1024)  # a realistic 3 MB file
+    submit(taro, course, file=("essay.pdf", data, "application/pdf"))
+    stored = only(engine, StoredFile)[0]
+    assert fake_supabase["objects"][stored.storage_path] == data  # arrived whole, streamed
+    upload = next(r for r in fake_supabase["requests"] if r[0] == "POST")
+    assert upload[2]["Content-Type"] == "application/pdf" and upload[2]["x-upsert"] == "false"
+    assert admin.get(f"/files/{stored.id}").content == data  # and comes back the same
+    taro.post(f"/submissions/{only(engine, Submission)[0].id}/delete")
+    assert fake_supabase["objects"] == {}  # deleted from storage too
+
+
+def test_supabase_refusals_are_explained(engine, admin, taro, course, fake_supabase, monkeypatch):
+    import storage
+
+    monkeypatch.setenv("SUPABASE_BUCKET", "wrong-name")
+    status = storage.check()
+    assert status["ok"] is False and "Bucket not found" in status["message"] and "SUPABASE_BUCKET" in status["message"]
+    monkeypatch.setenv("SUPABASE_BUCKET", "seminar-files")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_publishable_wrong")
+    response = submit(taro, course, file=("essay.pdf", b"x", "application/pdf"))
+    assert "File storage refused the upload (HTTP 401: Invalid API key)" in response.text
+    assert only(engine, StoredFile) == []  # nothing half-saved
+    assert "Invalid API key" in admin.get("/members").text  # and the Members page says why
+
+
+def test_storage_check_warns_about_render_without_supabase(admin, monkeypatch):
+    import storage
+
+    monkeypatch.setenv("RENDER", "true")
+    status = storage.check()
+    assert status["ok"] is False and "lost" in status["message"]
+    assert "temporary disk" in admin.get("/members").text
+
+
+def test_a_missing_file_gives_a_clear_message(engine, admin, taro, course):
+    submit(taro, course)
+    stored = only(engine, StoredFile)[0]
+    (Path(os.environ["LOCAL_FILES_DIR"]) / stored.storage_path).unlink()
+    response = admin.get(f"/files/{stored.id}", headers={"accept": "text/html"})
+    assert response.status_code == 404 and "missing from file storage" in response.text

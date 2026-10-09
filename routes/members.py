@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, Form, Request
 from sqlmodel import Session, delete, select, update
 
 from db import (
+    DATABASE_LIMIT,
     Agent,
     ClassVisit,
     Course,
     CourseEnrolledUser,
     CourseHiddenUser,
+    FeedFilter,
     Folder,
     Gen,
     LoginSession,
@@ -17,7 +19,6 @@ from db import (
     StoredFile,
     Submission,
     Task,
-    DATABASE_LIMIT,
     User,
     database_size,
     get_session,
@@ -35,6 +36,7 @@ from security import (
     require_admin,
     temporary_password,
 )
+import storage
 from uploads import STORAGE_TOTAL_LIMIT, total_stored
 from usage import database_breakdown, file_breakdown
 from web import render
@@ -59,7 +61,7 @@ def members_page(request: Request, db: Session, viewer: Viewer, status_code: int
                   gens=gens, placeholders={u.id: placeholder(u, gen_numbers.get(u.gen_id)) for u in users},
                   storage_used=used, storage_limit=STORAGE_TOTAL_LIMIT,
                   storage_percent=min(100, round(used * 100 / STORAGE_TOTAL_LIMIT)),
-                  database_used=db_used, database_limit=DATABASE_LIMIT,
+                  storage_status=storage.check(), database_used=db_used, database_limit=DATABASE_LIMIT,
                   database_percent=min(100, round(db_used * 100 / DATABASE_LIMIT)) if db_used is not None else None,
                   **messages)
 
@@ -163,6 +165,7 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
         delete_agent(db, agent)
     for model, column in ((Folder, Folder.owner_id), (NotifySetting, NotifySetting.user_id),
                           (MonitorNotifySetting, MonitorNotifySetting.user_id),
+                          (FeedFilter, FeedFilter.user_id),
                           (LoginSession, LoginSession.user_id), (ClassVisit, ClassVisit.user_id),
                           (CourseEnrolledUser, CourseEnrolledUser.user_id),
                           (CourseHiddenUser, CourseHiddenUser.user_id)):

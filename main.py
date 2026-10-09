@@ -23,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi.staticfiles import StaticFiles
 
 # Importing db also loads your .env file (see the top of db.py).
+import storage
 from db import create_db_and_tables
 from routes import agent_api, agents, auth, classes, coursework, members
 from web import BASE_DIR, alert_html, templates
@@ -30,8 +31,11 @@ from web import BASE_DIR, alert_html, templates
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Runs once when the server starts: create tables and Gen 1-12 if missing."""
+    """Runs once when the server starts: create tables and Gen 1-12 if missing,
+    and say in the log where uploaded files are kept (and whether that works)."""
     create_db_and_tables()
+    status = storage.check()
+    print(f"File storage: {status['where']}. {'OK' if status['ok'] else 'PROBLEM'}: {status['message']}")
     yield
 
 

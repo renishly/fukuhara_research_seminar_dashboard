@@ -20,6 +20,7 @@ from db import (
     Command,
     Course,
     Event,
+    FeedFilter,
     Folder,
     InboxFile,
     Monitor,
@@ -29,6 +30,7 @@ from db import (
     StoredFile,
     User,
     get_session,
+    utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
 from routes.agent_tools import (
@@ -433,7 +435,8 @@ def feed_context(db: Session, viewer: Viewer, agent: Agent, section: str, select
     """A feed (Outputs or Monitors) and its Filter panel, for this viewer's choices.
 
     selected=None means a first visit: nothing is ticked, except the pinned
-    name, which starts ticked. Each visit starts fresh.
+    name, which starts ticked. The page uses saved_feed() instead, which
+    starts from the member's last choices.
     """
     feed = FEEDS[section]
     model = feed["model"]
@@ -471,9 +474,34 @@ def feed_context(db: Session, viewer: Viewer, agent: Agent, section: str, select
             "total": total, "is_owner": owns_agent(viewer, agent)}
 
 
+def saved_feed(db: Session, viewer: Viewer, agent: Agent, section: str) -> dict:
+    """A feed with the Filter choices this member last made for this agent.
+    Never chosen before: nothing ticked, except the pinned name."""
+    saved = db.get(FeedFilter, (viewer.id, agent.id, section))
+    if saved is None:
+        return feed_context(db, viewer, agent, section)
+    return feed_context(db, viewer, agent, section, list(saved.selected or []), saved.show_all, saved.sort,
+                        saved.order)
+
+
+def remember_filter(db: Session, viewer: Viewer, agent: Agent, section: str, selected: list[str],
+                    show_all: bool, sort: str, order: str) -> None:
+    """Save a member's Filter choices for this agent's feed (only when they changed)."""
+    selected = list(dict.fromkeys(selected))
+    saved = db.get(FeedFilter, (viewer.id, agent.id, section))
+    if saved is not None and (saved.selected, saved.show_all, saved.sort, saved.order) == (selected, show_all,
+                                                                                            sort, order):
+        return
+    saved = saved or FeedFilter(user_id=viewer.id, agent_id=agent.id, section=section)
+    saved.selected, saved.show_all, saved.sort, saved.order = selected, show_all, sort, order
+    saved.updated_at = utc_now()
+    db.add(saved)
+    db.commit()
+
+
 def both_feeds(db: Session, viewer: Viewer, agent: Agent) -> dict:
-    return {"outputs_feed": feed_context(db, viewer, agent, "outputs"),
-            "monitors_feed": feed_context(db, viewer, agent, "monitors")}
+    return {"outputs_feed": saved_feed(db, viewer, agent, "outputs"),
+            "monitors_feed": saved_feed(db, viewer, agent, "monitors")}
 
 
 def inbox_context(db: Session, agent: Agent, error: str | None = None, notice: str | None = None) -> dict:
@@ -500,7 +528,7 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
 
 
 def feed_list(db: Session, viewer: Viewer, agent_id: int, section: str, c: list[str], show_all: bool,
-              sort: str, order: str, known: list[str], seen: str | None):
+              sort: str | None, order: str, known: list[str], seen: str | None):
     """A feed's list for the Filter's current choices (also re-asked every few seconds).
 
     Only the list is replaced, so an open Filter panel isn't disturbed. The
@@ -508,7 +536,12 @@ def feed_list(db: Session, viewer: Viewer, agent_id: int, section: str, c: list[
     removed: `known` lists the ones the panel shows now.
     """
     agent = viewable_agent(db, viewer, agent_id)
-    context = feed_context(db, viewer, agent, section, c, show_all, sort, order)
+    context = feed_context(db, viewer, agent, section, c, show_all, sort or "date", order)
+    # The Filter form always sends its sort, so a request with one carries the
+    # Filter's current choices: remember them for this member's next visit.
+    if sort is not None:
+        remember_filter(db, viewer, agent, section, context["selected"], context["show_all"], context["sort"],
+                        context["order"])
     parts = [render_text(db, viewer, "partials/feed_list.html", f=context),
              render_text(db, viewer, "partials/feed_summary.html", f=context, oob=True)]
     if sorted(known) != sorted(row["name"] for row in context["names"]):
@@ -518,14 +551,14 @@ def feed_list(db: Session, viewer: Viewer, agent_id: int, section: str, c: list[
 
 @router.get("/agents/{agent_id}/outputs")
 def agent_outputs(agent_id: int, c: list[str] = Query([]), show_all: bool = Query(False, alias="all"),
-                  sort: str = "date", order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
+                  sort: str | None = None, order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
                   viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
     return feed_list(db, viewer, agent_id, "outputs", c, show_all, sort, order, known, seen)
 
 
 @router.get("/agents/{agent_id}/monitors")
 def agent_monitors(agent_id: int, c: list[str] = Query([]), show_all: bool = Query(False, alias="all"),
-                   sort: str = "date", order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
+                   sort: str | None = None, order: str = "desc", known: list[str] = Query([]), seen: str | None = None,
                    viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
     return feed_list(db, viewer, agent_id, "monitors", c, show_all, sort, order, known, seen)
 

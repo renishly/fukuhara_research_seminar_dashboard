@@ -710,3 +710,38 @@ def test_connector_sets_named_monitors_and_buffers_only_the_newest_value_each(en
     assert connector.set_monitor(None, "Status") is True  # None removes it
     assert connector.delete_monitors("Queue") == 1
     assert [m.name for m in rows(engine, Monitor)] == ["Summary"]
+
+
+# --- Remembered Filter choices --------------------------------------------------------------
+
+
+def test_filter_choices_are_remembered_per_member_agent_and_feed(engine, client, taro, hanako, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    client.post("/api/outputs", json={"category": "news", "content": "Headline"}, headers=api("helper"))
+    client.post("/api/outputs", json={"category": "stats", "content": 7}, headers=api("helper"))
+    put_monitor(client, "Status", "All good")
+    assert "Headline" not in taro.get(f"/agents/{agent_id}").text  # nothing chosen yet
+    # Choosing in the Filter (the form always sends its sort) is remembered...
+    taro.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "name", "order": "asc"})
+    taro.get(f"/agents/{agent_id}/monitors", params={"all": "true", "sort": "date", "order": "desc"})
+    page = taro.get(f"/agents/{agent_id}").text
+    assert "Headline" in page and "All good" in page  # ...so it's all back on the next visit
+    assert '<option value="name" selected>' in page
+    # ...for that member only.
+    other = hanako.get(f"/agents/{agent_id}").text
+    assert "Headline" not in other and "All good" not in other
+    # Unticking everything is remembered too.
+    taro.get(f"/agents/{agent_id}/outputs", params={"sort": "date", "order": "desc"})
+    assert "Headline" not in taro.get(f"/agents/{agent_id}").text
+
+
+def test_background_refreshes_without_the_filter_change_nothing(engine, client, taro, course, create_agent):
+    from db import FeedFilter
+
+    agent_id = create_agent(taro, course, "helper")
+    client.post("/api/outputs", json={"category": "news", "content": "Headline"}, headers=api("helper"))
+    taro.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "date", "order": "desc"})
+    saved = rows(engine, FeedFilter)[0].updated_at
+    taro.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "date", "order": "desc"})  # same choices
+    taro.get(f"/agents/{agent_id}/outputs", params={"known": "news"})  # no Filter values at all
+    assert rows(engine, FeedFilter)[0].updated_at == saved and rows(engine, FeedFilter)[0].selected == ["news"]

@@ -90,6 +90,11 @@
         <progress class="progress w-full" value="{{ storage_percent }}" max="100"></progress>
         <p class="text-sm">{{ storage_used | human_size }} of {{ storage_limit | human_size }} used ({{ storage_percent }}%).
           New uploads are refused above that, to stay inside Supabase's free 1 GB.</p>
+        {# Where files are kept, and whether that works right now (checked each time this page opens). #}
+        <div role="status" class="alert {{ 'alert-soft' if storage_status.ok else 'alert-error alert-soft' }} text-sm">
+          <span><strong>{{ "&#10003;" | safe if storage_status.ok else "&#9888;" | safe }} Files are kept in {{ storage_status.where }}.</strong>
+            {{ storage_status.message }}</span>
+        </div>
         {# The breakdown is only worked out when opened. #}
         <details class="pt-1" hx-get="/members/usage/files" hx-trigger="toggle once" hx-target="find .usage">
           <summary class="cursor-pointer text-sm font-semibold">Show breakdown</summary>
