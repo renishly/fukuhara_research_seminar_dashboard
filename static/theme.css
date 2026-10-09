@@ -391,20 +391,35 @@ code.block {
 
 /* --- The student window --------------------------------------------------------- */
 
+/* The window is a fixed-size viewport onto a 2D plane: the cells sit in the
+   middle of the plane, with empty "leeway" around them on every side that
+   isn't visible at first but can be moved to (drag, scroll wheel, scroll bars
+   or fingers). A faint dot grid moves with the plane, so moving is visible
+   even over empty space. static/ui.js shows the cells when the window opens. */
 .sw-frame {
+  position: relative;
   overflow: auto;
-  max-height: 70vh;
+  height: 60vh;
+  min-height: 20rem;
   border: 1.5px solid var(--ink);
   background: rgb(215 229 248 / 0.25);
 }
 .sw-canvas {
+  width: max-content;
+  min-width: 100%;
+  /* The leeway: nearly a whole window's width and height on each side, so the
+     cells can be moved almost to any edge. (A percentage padding is measured
+     against the window's width; the height uses the window's 60vh.) */
+  padding: max(8rem, calc(60vh - 6rem)) max(8rem, calc(100% - 6rem));
+  background-image: radial-gradient(rgb(11 31 58 / 0.18) 1px, transparent 1.2px);
+  background-size: 24px 24px;
+}
+.sw-content {
   display: flex;
   flex-wrap: nowrap;
   align-items: flex-start;
   gap: 2rem;
-  padding: 1.25rem;
   width: max-content;
-  min-width: 100%;
 }
 /* A gen's group: a lightly tinted, see-through frame with a dashed navy border. */
 .gen-frame {

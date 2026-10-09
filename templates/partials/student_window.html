@@ -1,7 +1,10 @@
 {# The inside of the student window: one framed group per gen (newest first),
-   one fixed-size cell per enrolled student. #}
+   one fixed-size cell per enrolled student. The cells (.sw-content) sit in the
+   middle of a larger plane (.sw-canvas) with empty space ("leeway") on every
+   side, so the window can be moved around in two directions (x and y). #}
 {% if groups %}
 <div class="sw-canvas">
+<div class="sw-content">
   {% for group in groups %}
   <section class="gen-frame" aria-label="{{ gen_label(group.gen) }}">
     <span class="gen-label">{{ gen_label(group.gen) or "No gen" }}</span>
@@ -34,6 +37,7 @@
     </div>
   </section>
   {% endfor %}
+</div>
 </div>
 {% else %}
 <p class="p-6 text-center text-base-content/70">Nobody is enrolled in this class yet.</p>

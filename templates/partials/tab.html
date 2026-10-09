@@ -28,10 +28,11 @@
   <div class="space-y-2">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2 class="section-title font-semibold">{{ "Agents" if tab == "agents" else "Students" }}</h2>
-      <button type="button" class="btn btn-ghost btn-xs" data-scroll-to="start" data-target="sw-frame">Re-centre</button>
+      <button type="button" class="btn btn-ghost btn-xs" data-scroll-to="home" data-target="sw-frame">Re-centre</button>
     </div>
-    {# The student window: as big as it needs to be; drag or scroll to move around. #}
-    <div id="sw-frame" class="sw-frame" data-pan>
+    {# The student window: a viewport onto a 2D plane. Drag, scroll or use the
+       scroll bars to move in any direction; "Re-centre" brings the cells back. #}
+    <div id="sw-frame" class="sw-frame" data-pan data-plane>
       <div hx-get="/classes/{{ course.id }}/window/{{ tab }}"
            hx-trigger="every {{ poll_seconds }}s [document.visibilityState === 'visible']"
            hx-include="#window-seen-{{ tab }}" hx-swap="innerHTML" hx-disinherit="*">

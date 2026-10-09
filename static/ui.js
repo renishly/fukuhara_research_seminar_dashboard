@@ -22,6 +22,7 @@
     const frame = event.target.closest("[data-pan]");
     if (!frame || event.pointerType !== "mouse" || event.button !== 0) return;
     if (event.target.closest("input, textarea, select, button")) return;
+    event.preventDefault(); // don't start selecting text (clicks still work)
     drag = { frame, x: event.clientX, y: event.clientY, left: frame.scrollLeft, top: frame.scrollTop, moved: false };
   });
 
@@ -59,8 +60,10 @@
 // ---------------------------------------------------------------------------
 // 2. Centring. The server (timeline.py) works out every position in pixels;
 // the timeline element says which x position belongs in the middle of the
-// screen (data-center-x). Buttons with data-scroll-to="today" or "start"
+// screen (data-center-x). Buttons with data-scroll-to="today" or "home"
 // scroll their target frame back (the "Today" and "Re-centre" buttons).
+// The student window (data-plane) is a 2D plane with empty space around its
+// cells; "home" is the view that shows the cells (centred if they fit).
 // ---------------------------------------------------------------------------
 function centreTimeline() {
   const frame = document.getElementById("timeline-frame");
@@ -79,6 +82,30 @@ function timelineCenter() {
   return Number(canvas.dataset.firstMonth) + middle / Number(canvas.dataset.pxPerMonth);
 }
 
+function planeHome(frame) {
+  const content = frame.querySelector(".sw-content");
+  if (!content) return { left: 0, top: 0 };
+  const MARGIN = 24;
+  const axis = (start, size, view) => (size + 2 * MARGIN > view ? start - MARGIN : start + size / 2 - view / 2);
+  return {
+    left: axis(content.offsetLeft, content.offsetWidth, frame.clientWidth),
+    top: axis(content.offsetTop, content.offsetHeight, frame.clientHeight),
+  };
+}
+
+// Show the cells when a window first appears (page load or a tab switch), but
+// not when its cells refresh every 15 s, so nobody is pulled back mid-move.
+function homeNewPlanes() {
+  document.querySelectorAll("[data-plane]:not([data-homed])").forEach((frame) => {
+    const home = planeHome(frame);
+    frame.scrollLeft = home.left;
+    frame.scrollTop = home.top;
+    frame.dataset.homed = "yes";
+  });
+}
+
+document.addEventListener("DOMContentLoaded", homeNewPlanes);
+document.addEventListener("htmx:afterSettle", homeNewPlanes);
 document.addEventListener("DOMContentLoaded", centreTimeline);
 document.addEventListener("htmx:afterSettle", (event) => {
   if (event.target.id === "timeline-frame" || event.target.closest?.("#timeline-frame")) centreTimeline();
@@ -92,7 +119,7 @@ document.addEventListener("click", (event) => {
     const canvas = frame.querySelector("[data-today-x]");
     frame.scrollTo({ left: Number(canvas.dataset.todayX) - frame.clientWidth / 2, behavior: "smooth" });
   } else {
-    frame.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+    frame.scrollTo({ ...planeHome(frame), behavior: "smooth" });
   }
 });
 
