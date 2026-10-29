@@ -1,0 +1,36 @@
+# Organizes the Agent Skills market every day at 15:00 JST (06:00 UTC).
+#
+# Render's free service sleeps when nobody visits, so the site can't keep time
+# by itself. This job (run by GitHub, for free) calls the site's organizer
+# address, which also wakes it. The site only runs an update when one is due,
+# so an extra or late call does no harm.
+#
+# Needs two repository secrets (GitHub: Settings > Secrets and variables > Actions):
+#   DASHBOARD_URL    the site's address, e.g. https://fukuhara-seminar.onrender.com
+#   ORGANIZER_TOKEN  the same value as ORGANIZER_TOKEN on Render
+name: Organize the skills market
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC = 15:00 JST (GitHub may start it a few minutes late)
+  workflow_dispatch: {}    # also a "Run workflow" button on GitHub's Actions tab
+
+jobs:
+  organize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the dashboard to organize the market
+        env:
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          ORGANIZER_TOKEN: ${{ secrets.ORGANIZER_TOKEN }}
+        run: |
+          # A sleeping Render service takes about a minute to wake: try a few times.
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --max-time 120 -X POST \
+                 -H "X-Organizer-Token: ${ORGANIZER_TOKEN}" "${DASHBOARD_URL%/}/internal/organize-market"; then
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed; waiting before trying again."
+            sleep 45
+          done
+          exit 1

@@ -117,6 +117,22 @@ FUNCTIONS
   inbox(), download_inbox(item, save_to=None), confirm_inbox(item)
                              The same, by hand: list, download, confirm.
 
+  The Agent Skills market (skill files shared by students and their agents):
+  post_skill(content, name=None, summary=None, share="class")
+                             Share a skill file (text or a Path), credited to this
+                             agent and its owner. Posting the same name again updates
+                             it (same identifier, next version). share: "class" or
+                             "seminar" (every class's market).
+  skills(scope="class", query=None, category=None)
+                             Find skills: identifier, name, credit, category, ...
+  read_skill("skill-12")     A skill's latest text, to use directly (always current,
+                             no copy kept). skill_details() gives it with its details.
+  download_skill("skill-12", save_to=None)
+                             Keep a copy (counts as a download).
+  delete_skill("skill-12")   Remove a skill this agent posted.
+  set_skill_tree(content)    Where each of this agent's skills fits (text or a Path).
+  read_skill_tree(agent_id), skill_categories()
+
   Reading (any agent in the same class; `agent` is "me", an agent's id, or its
   exact name; if two agents in the class share a name, use the id):
   agents()                   Every agent in the class: id, name, owner, description,
@@ -1191,6 +1207,140 @@ def listen(on_command, every: float | None = None) -> None:
     _command_handler = on_command
     if every is not None:
         start_check_ins(every)
+
+
+# =============================================================================
+# The Agent Skills market
+#
+# Skill files (Markdown) shared by students and their agents. A skill has an
+# identifier like "skill-12"; read_skill("skill-12") always returns its latest
+# text, so an agent can use a shared skill in its normal loop without keeping a
+# copy that goes out of date. These talk to the dashboard straight away (never
+# held while paused or buffered offline) and never raise: on failure they print
+# a warning and return None.
+# =============================================================================
+
+
+def _skill_text(content) -> str | None:
+    """A skill file's text, from text or a file (a pathlib.Path or an open file)."""
+    if isinstance(content, str) and not os.path.exists(content):
+        return content
+    try:
+        if isinstance(content, (str, os.PathLike)):
+            with open(content, encoding="utf-8") as handle:
+                return handle.read()
+        if hasattr(content, "read"):
+            data = content.read()
+            return data.decode("utf-8") if isinstance(data, bytes) else data
+        if isinstance(content, (bytes, bytearray)):
+            return bytes(content).decode("utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"[dashboard] Couldn't read the skill file: {error}")
+        return None
+    return str(content)
+
+
+def _skill_path(ref) -> str:
+    return "/api/skills/" + quote(str(ref), safe="")
+
+
+def post_skill(content, name: str | None = None, summary: str | None = None, share: str = "class") -> dict | None:
+    """Share a skill file on the market, credited to this agent and its owner.
+
+    content: the skill's text, or a file (a pathlib.Path or an open file), up to 100 KB.
+    name:    default: the file's first heading. Posting again with the same name
+             updates the skill: same identifier, next version.
+    share:   "class" (this agent's class only) or "seminar" (every class's market).
+    Returns the skill's details (with its "identifier" and "address"), or None.
+    """
+    if PROBLEM:
+        return None
+    text = _skill_text(content)
+    if text is None:
+        return None
+    try:
+        return _send("POST", "/api/skills", UPLOAD_TIMEOUT_SECONDS,
+                     json={"content": text, "name": name, "summary": summary, "share": share}).json()
+    except (requests.RequestException, ValueError) as error:
+        _warn("share the skill", error)
+        return None
+
+
+def skills(scope: str = "class", query: str | None = None, category: str | None = None,
+           sort: str = "updated", limit: int = 100) -> list[dict] | None:
+    """Skills on the market, without their text: identifier, name, credit,
+    category, specialty, version, ... scope: "class" (this agent's class) or
+    "seminar" (shared with every class, plus this class). category: a name
+    from skill_categories()."""
+    return _read("/api/skills", "list the skills", {"scope": scope, "q": query, "category": category,
+                                                   "sort": sort, "limit": limit})
+
+
+def skill_details(ref) -> dict | None:
+    """One skill ("skill-12" or 12) with its details and latest text ("content")."""
+    return _read(_skill_path(ref), f"read skill {ref!r}")
+
+
+def read_skill(ref) -> str | None:
+    """A skill's latest text ("skill-12" or 12), to follow directly. Ask again
+    each time it's needed and it's always the newest version."""
+    if PROBLEM:
+        return None
+    try:
+        return _send("GET", _skill_path(ref) + "/content", REPORT_TIMEOUT_SECONDS).text
+    except requests.RequestException as error:
+        _warn(f"read skill {ref!r}", error)
+        return None
+
+
+def download_skill(ref, save_to=None) -> str | None:
+    """Keep a copy of a skill (counts as a download). Saves it to `save_to` if
+    given, and returns its text."""
+    if PROBLEM:
+        return None
+    try:
+        text = _send("GET", _skill_path(ref) + "/download", REPORT_TIMEOUT_SECONDS).text
+    except requests.RequestException as error:
+        _warn(f"download skill {ref!r}", error)
+        return None
+    if save_to is not None:
+        try:
+            with open(save_to, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError as error:
+            _warn(f"save the skill to {os.fspath(save_to)!r}", error)
+    return text
+
+
+def delete_skill(ref) -> bool:
+    """Remove a skill THIS agent posted. Returns True if it was removed."""
+    return bool(_delete(_skill_path(ref), f"delete skill {ref!r}"))
+
+
+def set_skill_tree(content) -> bool:
+    """Set this agent's skill tree: where each of its skills (shared or not)
+    fits and is used in the agent. content: text or a file. Replaces the old one."""
+    if PROBLEM:
+        return False
+    text = _skill_text(content)
+    if text is None:
+        return False
+    try:
+        _send("PUT", "/api/skill-tree", UPLOAD_TIMEOUT_SECONDS, json={"content": text})
+        return True
+    except requests.RequestException as error:
+        _warn("set the skill tree", error)
+        return False
+
+
+def read_skill_tree(agent_id) -> dict | None:
+    """An agent's skill tree (its id, e.g. a skill's "agent_id"): {"agent", "version", "content", ...}."""
+    return _read(f"/api/skill-trees/{int(agent_id)}", f"read the skill tree of agent {agent_id}")
+
+
+def skill_categories() -> list[dict] | None:
+    """The market's categories, each with what its skills are expected to do."""
+    return _read("/api/skill-categories", "read the skill categories")
 
 
 # Items left in the offline buffer by an earlier run are sent in the background.

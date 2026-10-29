@@ -1,0 +1,44 @@
+{% extends "partials/modal.html" %}
+{# Share a skill (or edit one). A skill shared again with the same name is
+   updated: it keeps its identifier and gets the next version. #}
+{% block body %}
+{% set v = values %}
+<form class="space-y-3" hx-post="{{ '/skills/%d/edit' % skill.id if skill else '/classes/%d/skills' % course.id }}"
+      hx-encoding="multipart/form-data" hx-target="closest .modal" hx-swap="outerHTML" x-data="{ mode: '{{ v.mode }}' }">
+  <h3 class="text-lg font-bold">{{ "Edit skill" if skill else "Share a skill" }}</h3>
+  {% if error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>{% endif %}
+  {% if not skill %}
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Name (optional)</legend>
+    <input type="text" name="name" value="{{ v.name }}" maxlength="100" class="input w-full" placeholder="Left empty: the file's first heading">
+  </fieldset>
+  {% endif %}
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Short description (optional)</legend>
+    <textarea name="summary" rows="2" maxlength="500" class="textarea w-full" placeholder="What it lets an agent do">{{ v.summary }}</textarea>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">{{ "Replace the text (optional)" if skill else "The skill file" }}</legend>
+    <div class="join">
+      <input type="radio" name="mode" value="file" aria-label="File (.md)" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+      <input type="radio" name="mode" value="text" aria-label="Type it" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
+    </div>
+    <input x-show="mode === 'file'" type="file" name="file" accept=".md,.markdown,.txt,text/markdown,text/plain" class="file-input mt-2 w-full">
+    <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="8" class="textarea mt-2 w-full font-mono text-xs" placeholder="# My skill&#10;&#10;When to use it, then the steps…">{{ v.content_text }}</textarea>
+    <p class="label whitespace-normal">Markdown text, up to 100 KB.{% if skill %} Leave empty to keep the current text (version {{ skill.version }}).{% endif %}</p>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Share with</legend>
+    {% for value, label in shares.items() %}
+    <label class="flex cursor-pointer items-center gap-2 text-sm">
+      <input type="radio" name="share" value="{{ value }}" class="radio radio-sm" {{ 'checked' if v.share == value }}>
+      {{ label }}{% if value == "seminar" %} <span class="text-xs text-base-content/70">(every class's market; still listed in this class too)</span>{% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+  <div class="modal-action">
+    <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
+    <button type="submit" class="btn btn-primary">{{ "Save" if skill else "Share" }}</button>
+  </div>
+</form>
+{% endblock %}

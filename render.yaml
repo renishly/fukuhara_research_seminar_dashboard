@@ -32,3 +32,9 @@ services:
         sync: false
       - key: KEY_ENCRYPTION_SECRET  # a Fernet key; encrypts agents' API keys
         sync: false
+      - key: OPENROUTER_API_KEY  # optional: the skills market's AI organizer (without it: keyword rules)
+        sync: false
+      - key: OPENROUTER_MODEL  # optional; openrouter/free picks an available free model
+        value: openrouter/free
+      - key: ORGANIZER_TOKEN  # lets the daily GitHub timer start the organizer (same value as its secret)
+        sync: false

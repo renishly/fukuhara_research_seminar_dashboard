@@ -7,6 +7,7 @@
    Files go through /files/{id}, which checks permissions; only PNG, JPEG, GIF
    and WebP images are shown inline. @click.stop keeps a click inside a grid
    card from also opening the agent page. #}
+{% import "partials/preview.html" as preview %}
 {% macro content(output, file=None, inline_types=(), compact=false) %}
   {% if output.kind == "number" %}
     <p class="font-mono {{ 'text-lg' if compact else 'text-2xl' }} font-semibold">{{ output.value }}</p>
@@ -32,6 +33,7 @@
     {% endif %}
     <p class="{{ 'text-sm' if compact }}">&#128206; <a href="/files/{{ output.file_id }}" class="link break-all" @click.stop>{{ output.value }}</a>
       {% if file and not compact %}<span class="text-xs text-base-content/60">({{ file.size | human_size }})</span>{% endif %}</p>
+    {% if file and not compact %}{{ preview.button(file) }}{% endif %}
   {% else %}
     <p class="break-words {{ 'text-sm line-clamp-2' if compact else 'whitespace-pre-wrap' }}">{{ output.value }}</p>
   {% endif %}

@@ -31,6 +31,8 @@ from db import (
     MonitorNotifySetting,
     NotifySetting,
     Output,
+    Skill,
+    SkillTree,
     Submission,
     Task,
     User,
@@ -175,8 +177,12 @@ def delete_agent(db: Session, agent: Agent) -> None:
         db.delete(item)
         db.flush()
         delete_stored_file(db, file_id)
-    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter):
+    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter, SkillTree):
         db.exec(delete(model).where(model.agent_id == agent.id))
+    # Skills it shared stay on the market, still credited to it by name.
+    for skill in db.exec(select(Skill).where(Skill.agent_id == agent.id)).all():
+        skill.agent_id = None
+        db.add(skill)
     db.delete(agent)
 
 
@@ -188,6 +194,7 @@ def delete_course(db: Session, course: Course) -> None:
         delete_task(db, task)
     for agent in db.exec(select(Agent).where(Agent.course_id == course.id)).all():
         delete_agent(db, agent)
+    db.exec(delete(Skill).where(Skill.course_id == course.id))
     for model in (CourseEnrolledGen, CourseEnrolledUser, CourseHiddenGen, CourseHiddenUser, ClassVisit):
         db.exec(delete(model).where(model.course_id == course.id))
     db.delete(course)

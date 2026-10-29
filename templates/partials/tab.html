@@ -41,4 +41,8 @@
       </div>
     </div>
   </div>
+
+  {% if tab == "agents" and viewer.is_member %}
+  {% include "partials/skills_market.html" %}
+  {% endif %}
 </section>

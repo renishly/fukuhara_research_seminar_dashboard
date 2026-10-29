@@ -464,3 +464,42 @@ def test_a_missing_file_gives_a_clear_message(engine, admin, taro, course):
     (Path(os.environ["LOCAL_FILES_DIR"]) / stored.storage_path).unlink()
     response = admin.get(f"/files/{stored.id}", headers={"accept": "text/html"})
     assert response.status_code == 404 and "missing from file storage" in response.text
+
+
+# --- Previews of PDFs, HTML and text ------------------------------------------------------
+
+
+def preview_of(person, engine, filename):
+    with Session(engine) as db:
+        stored = db.exec(select(StoredFile).where(StoredFile.filename == filename)).one()
+    return person.get(f"/files/{stored.id}/preview")
+
+
+def test_pdfs_html_and_text_can_be_previewed(engine, admin, taro, course):
+    submit(taro, course, title="P", file=("paper.pdf", b"%PDF-1.4 real", "application/pdf"))
+    submit(taro, course, title="H", file=("page.html", b"<h1>Hi</h1><script>alert(1)</script>", "text/html"))
+    submit(taro, course, title="T", file=("notes.md", b"# Notes", "application/octet-stream"))
+    submit(taro, course, title="Z", file=("data.zip", b"PK", "application/zip"))
+    pdf = preview_of(admin, engine, "paper.pdf")
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+    assert pdf.headers["content-disposition"].startswith("inline")
+    html_page = preview_of(admin, engine, "page.html")
+    policy = html_page.headers["content-security-policy"]
+    assert html_page.headers["content-type"].startswith("text/html")
+    assert policy.startswith("sandbox;") and "script-src" not in policy and "default-src 'none'" in policy
+    text = preview_of(admin, engine, "notes.md")
+    assert text.headers["content-type"].startswith("text/plain") and text.content == b"# Notes"
+    assert "sandbox" in text.headers["content-security-policy"]
+    assert preview_of(admin, engine, "data.zip").status_code == 404  # not previewable: download only
+    page = admin.get(f"/classes/{course}/assignments/students/{taro.id}").text
+    assert page.count("Preview</button>") == 3
+
+
+def test_a_fake_pdf_is_not_previewed(engine, admin, taro, course):
+    submit(taro, course, file=("fake.pdf", b"<html><script>alert(1)</script>", "application/pdf"))
+    assert preview_of(admin, engine, "fake.pdf").status_code == 404
+
+
+def test_previews_follow_download_permissions(engine, make_person, taro, course):
+    submit(taro, course, file=("private.pdf", b"%PDF-1.4 x", "application/pdf"))  # not ticked for guests
+    assert preview_of(make_person("guest"), engine, "private.pdf").status_code == 404

@@ -1,0 +1,45 @@
+{% extends "partials/modal.html" %}
+{# One skill: who shared it, where it fits, its identifier and address (what
+   to give an agent), its latest text, and its agent's skill tree. #}
+{% block size %}max-w-3xl{% endblock %}
+{% block body %}
+<div class="space-y-4" x-data="{ deleting: false, showTree: false }">
+  <div class="space-y-1">
+    <h3 class="text-lg font-bold normal-case tracking-normal">{{ skill.name }}</h3>
+    <p class="text-sm">Shared {{ credit }} &middot; {{ "whole seminar" if skill.share == "seminar" else "this class only" }}
+      ({{ course_name(course) if course else "a deleted class" }})</p>
+    <p class="text-xs text-base-content/70">Version {{ skill.version }} &middot; updated {{ skill.updated_at | jst }}
+      &middot; {{ skill.downloads }} download{{ "s" if skill.downloads != 1 }}{% if category %} &middot; {{ category.name }}{% endif %}</p>
+  </div>
+  {% if skill.summary %}<p>{{ skill.summary }}</p>{% endif %}
+  {% if skill.specialty %}<p class="text-sm italic">{{ skill.specialty }}</p>{% endif %}
+
+  <div class="space-y-1 border border-base-content/30 bg-white/50 p-3 text-sm">
+    <p class="font-semibold">Give this to an agent</p>
+    <p>Identifier: <code class="select-all">{{ identifier }}</code></p>
+    <p class="break-all">Address (always the latest version, with the agent's API key): <code class="select-all">{{ address }}</code></p>
+    <p>With the connector: <code class="select-all">read_skill("{{ identifier }}")</code></p>
+  </div>
+
+  <pre class="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ skill.content }}</pre>
+
+  {% if tree %}
+  <div class="space-y-2">
+    <button type="button" class="btn btn-sm" @click="showTree = !showTree" x-text="showTree ? 'Hide its agent\'s skill tree' : 'Show its agent\'s skill tree'">Show its agent's skill tree</button>
+    <pre x-show="showTree" x-cloak class="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ tree.content }}</pre>
+  </div>
+  {% endif %}
+
+  <div class="modal-action flex-wrap">
+    {% if can_delete %}
+    <button type="button" class="btn btn-error btn-outline btn-sm mr-auto" x-show="!deleting" @click="deleting = true">Remove</button>
+    <span x-show="deleting" x-cloak class="mr-auto flex items-center gap-2 text-sm">Remove it from the market?
+      <button type="button" class="btn btn-error btn-sm" hx-post="/skills/{{ skill.id }}/delete">Remove</button>
+      <button type="button" class="btn btn-ghost btn-sm" @click="deleting = false">No</button></span>
+    {% endif %}
+    {% if can_change %}<button type="button" class="btn btn-sm" hx-get="/skills/{{ skill.id }}/edit" hx-target="#modal">Edit</button>{% endif %}
+    <a href="/skills/{{ skill.id }}/download" class="btn btn-primary btn-sm">Download .md</a>
+    <button type="button" class="btn btn-ghost btn-sm" @click="$el.closest('.modal').remove()">Close</button>
+  </div>
+</div>
+{% endblock %}

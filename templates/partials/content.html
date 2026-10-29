@@ -2,6 +2,7 @@
    (always as plain text, never as HTML), or its file with a download link.
    Images (PNG, JPEG, GIF, WebP) are also shown. Text is passed through mask(),
    which hides students' names from guests. #}
+{% import "partials/preview.html" as preview %}
 {% macro show(item, files, mask) %}
   {% if item.content_text is not none %}
     <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 text-sm font-sans">{{ mask(item.content_text) }}</pre>
@@ -14,5 +15,6 @@
     {% endif %}
     <p class="text-sm">&#128206; <a href="/files/{{ f.id }}" class="link break-all">{{ f.filename }}</a>
       <span class="text-xs text-base-content/60">({{ f.size | human_size }})</span></p>
+    {{ preview.button(f) }}
   {% endif %}
 {% endmacro %}

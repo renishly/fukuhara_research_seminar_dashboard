@@ -50,6 +50,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | `storage.py` | Saves, streams and deletes files: Supabase Storage or a local folder |
 | `uploads.py` | Upload limits, file records, and sending files safely |
 | `usage.py` | What takes up file storage and database space, with the Members page's pie charts |
+| `market.py` | The Agent Skills market: who sees which skills, identifiers, and the organizer |
 | `timeline.py` | Pure Python: lays class boxes out in lanes on the timeline |
 | `web.py` | Templates, times in JST, small reply helpers |
 | `routes/` | The pages and the API (see the diagram) |
@@ -205,6 +206,43 @@ $env:DASHBOARD_API_KEY="paste-the-key-here"; python agent\agent.py
 
 ---
 
+## The Agent Skills market
+
+Below the Agents tab's student window, members (never guests) share **skill files**: Markdown instructions that make an agent able to do something. Students upload them directly, and agents post them through the connector (`post_skill(...)`); either way a skill is credited to the student, and also to the agent if an agent posted it ("from Yamada Taro's agent, Researcher").
+
+- **Identifiers.** Every skill has an identifier like `skill-12` and an address like `https://your-site/api/skills/12/content`. Give either to an agent: `read_skill("skill-12")` always returns the **latest** version, so an agent can use a shared skill in its normal loop without keeping a copy that goes out of date. Posting a skill again with the same name updates it (same identifier, next version).
+- **Class or seminar.** Each skill is shared with *this class only* or the *whole seminar*. The market opens on the current class (its own skills, including the ones it shared with everyone); **Whole seminar** adds skills shared from every class.
+- **Skill trees.** For each agent, a skill tree describes where each of its skills (shared or not) fits in the agent. Upload one with **+ Skill tree**, or from an agent with `set_skill_tree(...)`.
+- **Filters**: search, category, shared by (members or agents), "Mine", and sort (by category, recently updated, most downloaded, name, newest).
+
+### The market organizer
+
+The organizer sorts skills into categories **by function** (data retrieval, decision frameworks, writing...), writes a description of what each category's skills do (shown above each group), and for each skill a note on what sets it apart from the others. It runs **every day at 15:00 JST**, plus once around 03:00 JST if skills changed: at most twice a day.
+
+- **With an OpenRouter key** (`OPENROUTER_API_KEY` on Render), an AI model does it in one request per run, using `OPENROUTER_MODEL` (default `openrouter/free`, which picks whichever free model is available). OpenRouter's free tier allows very few requests a day, so the site never makes more than two organizer requests a day, including admins' **Organize now** button.
+- **Without a key**, simple keyword rules sort the skills instead (that's what the local demo and the tests use).
+- **The 15:00 timer.** Render's free service sleeps when nobody visits, so a GitHub job (`.github/workflows/organize-market.yml`, free) wakes it at 15:00 JST every day and asks it to organize. Set it up once:
+  1. Make a long random value: `python -c "import secrets; print(secrets.token_hex(32))"`.
+  2. On Render, set `ORGANIZER_TOKEN` to it (and `OPENROUTER_API_KEY` to your key).
+  3. On GitHub, open the repository's **Settings → Secrets and variables → Actions** and add two repository secrets: `ORGANIZER_TOKEN` (the same value) and `DASHBOARD_URL` (e.g. `https://fukuhara-seminar.onrender.com`).
+  4. On the **Actions** tab, open "Organize the skills market" and use **Run workflow** once to check it works.
+
+  GitHub sometimes starts scheduled jobs a few minutes late. The site also checks every few minutes while it's awake, and catches up as soon as it wakes after 15:00.
+
+### Trying it locally (the demo)
+
+`scripts/seed_demo.py` fills a **local** demo database with sample accounts, a class, an agent, skills and a skill tree, and runs the organizer once. Run it with the same settings as a local server that uses `DATABASE_URL=sqlite:///./demo/demo.db` and `LOCAL_FILES_DIR=./demo/files` (temporary keys as environment variables, see "Running it on your computer"):
+
+```bash
+python scripts/seed_demo.py
+```
+
+The demo accounts and their test password are listed at the top of the script. It refuses to run against anything but a local SQLite file, and the `demo/` folder is git-ignored.
+
+## Previews of files
+
+PDFs, HTML pages and text files (Markdown, CSV, JSON...) have a **Preview** button wherever they're shown (assignments, submissions, agent outputs and monitors). PDFs open in the browser's own PDF viewer (only real PDFs). HTML and text are shown in a sealed-off frame: the browser treats them as coming from another site, and scripts can't run, so a file can't see anyone's sign-in or act on the site. Styles and pictures inside the file still display, but interactive pages (that need JavaScript) show only their static content.
+
 ## Running the tests
 
 ```bash
@@ -281,6 +319,10 @@ On the service's page in Render: **Settings** → **Custom Domains** → **Add C
 
 ---
 
+## Supabase's security warnings ("RLS disabled")
+
+Supabase also offers every table through its own automatic web API (PostgREST), and warns when tables have **row level security (RLS)** switched off. At every start the site switches RLS on for all its tables, without any rules, so Supabase's automatic API can't read or change them. The site itself is unaffected: it connects as the tables' owner, which Postgres doesn't hold to RLS. (It only changes tables it owns, and says so in the log otherwise.) After the first deploy with this, Supabase's **Advisors → Security** page should show no "RLS disabled" errors.
+
 ## Changing the database later
 
 At every start, the site creates missing tables and **adds** columns that exist in `db.py` but not yet in the database (each with its default value), so adding a new field to a table just works. **Renaming, removing or changing** a column needs a migration tool such as [Alembic](https://alembic.sqlalchemy.org/).
@@ -289,7 +331,7 @@ At every start, the site creates missing tables and **adds** columns that exist 
 
 ## Suggested next steps
 
-- **Instant updates** with Server-Sent Events, instead of pages checking every few seconds.
+- **Instant updates** with Server-Sent Events, instead of pages checking every few seconds (agent pages check every 10–15 seconds).
 - **Alembic migrations**, for renaming or removing columns safely.
 - **Switch off `/docs` in production** (`FastAPI(docs_url=None, redoc_url=None)` in `main.py`), or only show it to admins.
 - **Discord notifications** for the notify bells on output categories (the settings are already saved in the `NotifySetting` table).

@@ -758,3 +758,18 @@ def test_a_non_owners_choices_are_not_a_preset_for_others(client, taro, hanako, 
     hanako.get(f"/agents/{agent_id}/outputs", params={"c": "news", "sort": "date", "order": "desc"})
     third = make_person("student", "jiro", gen=9)
     assert "Headline" not in third.get(f"/agents/{agent_id}").text  # only the owner's choices are a preset
+
+
+def test_connector_shares_reads_and_trees_skills(engine, connector):
+    info = connector.post_skill("# Paper finder\nSearch arXiv.", summary="Papers", share="seminar")
+    assert info["identifier"].startswith("skill-") and info["credit"].endswith("agent, connected")
+    connector.post_skill("# Paper finder\nSearch arXiv and PubMed.")  # same name: an update
+    assert connector.read_skill(info["identifier"]) == "# Paper finder\nSearch arXiv and PubMed."
+    assert connector.skill_details(info["id"])["version"] == 2
+    assert [s["identifier"] for s in connector.skills()] == [info["identifier"]]
+    assert connector.download_skill(info["identifier"]).startswith("# Paper finder")
+    assert connector.set_skill_tree("# Tree\n- Paper finder: step 1") is True
+    agent_id = rows(engine, Agent)[0].id
+    assert connector.read_skill_tree(agent_id)["content"].startswith("# Tree")
+    assert connector.delete_skill(info["identifier"]) is True
+    assert connector.read_skill(info["identifier"]) is None  # gone: a warning, not an error

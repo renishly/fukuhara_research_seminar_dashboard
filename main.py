@@ -12,20 +12,26 @@ This file only sets the app up. The pages and the API live in routes/:
   routes/members.py     the admins' Members page
 """
 
+import asyncio
+import os
 import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.exc import SQLAlchemyError
+from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
+from sqlmodel import Session
 
 # Importing db also loads your .env file (see the top of db.py).
 import storage
-from db import create_db_and_tables
-from routes import agent_api, agents, auth, classes, coursework, members
+import market
+from db import create_db_and_tables, engine
+from routes import agent_api, agents, auth, classes, coursework, members, skills, skills_api
 from web import BASE_DIR, alert_html, templates
 
 
@@ -36,16 +42,53 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     status = storage.check()
     print(f"File storage: {status['where']}. {'OK' if status['ok'] else 'PROBLEM'}: {status['message']}")
+    schedule = None if os.getenv("SEMINAR_TESTING") == "1" else asyncio.create_task(organizer_schedule())
     yield
+    if schedule:
+        schedule.cancel()
+
+
+ORGANIZER_CHECK_SECONDS = 300
+
+
+def organize_if_due() -> None:
+    with Session(engine) as db:
+        record = market.run_if_due(db)
+        if record:
+            print(f"Market organizer ({record.trigger}): {record.message}")
+
+
+async def organizer_schedule():
+    """Every few minutes, run the skills market organizer if an update is due
+    (15:00 JST every day; see market.due()). The first check is shortly after
+    starting, so a server that slept through 15:00 catches up when it wakes."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await run_in_threadpool(organize_if_due)
+        except Exception as error:  # noqa: BLE001 - never let the schedule stop
+            print(f"Market organizer: {error}")
+        await asyncio.sleep(ORGANIZER_CHECK_SECONDS)
 
 
 app = FastAPI(title="Fukuhara Research Seminar Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
+# Compress pages, stylesheets and scripts before sending them (the stylesheet
+# shrinks from about 127 KB to 19 KB). Files that are already compressed, or
+# that people download, are sent as they are: compressing them again would
+# only cost the server time.
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,
+    exclude_content_types=("application/pdf", "application/octet-stream", "application/zip", "image/png",
+                           "image/jpeg", "image/gif", "image/webp", "text/event-stream"),
+)
+
 # The order matters where addresses look alike: e.g. POST /classes/1/agents
-# (agents.py) must be found before POST /classes/1/{assignments or exams}
-# (coursework.py), so coursework comes last.
-for module in (auth, classes, agents, agent_api, members, coursework):
+# (agents.py) or /classes/1/skills (skills.py) must be found before
+# /classes/1/{assignments or exams} (coursework.py), so coursework comes last.
+for module in (auth, classes, agents, skills, skills_api, agent_api, members, coursework):
     app.include_router(module.router)
 
 
@@ -60,6 +103,11 @@ async def never_store_private_pages(request: Request, call_next):
     response = await call_next(request)
     if not request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "no-store")
+    elif "v" in request.query_params:
+        # static_url() puts a fingerprint of the file's contents in the address
+        # (?v=...), so a given address never changes: browsers may keep it for
+        # a year without asking again. A changed file gets a new address.
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
 
 

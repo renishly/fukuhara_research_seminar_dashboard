@@ -1,0 +1,64 @@
+{# The market's results. Sorted "By category", skills are grouped under each
+   category, with the organizer's description of what that category's skills
+   do; choosing one category shows its description on top. #}
+{% macro card(skill) %}
+  {% set category = categories.get(skill.category_id) %}
+  <button type="button" class="card cursor-pointer text-left" hx-get="/skills/{{ skill.id }}" hx-target="#modal">
+    <span class="card-body gap-2 p-4">
+      <span class="flex items-start gap-2">
+        <strong class="min-w-0 flex-1 break-words">{{ skill.name }}</strong>
+        {% if skill.share == "seminar" %}<span class="badge badge-outline badge-xs shrink-0" title="Shared with the whole seminar">seminar</span>{% endif %}
+      </span>
+      <span class="text-xs text-base-content/70">
+        {%- if skill.agent_name %}from {{ owners.get(skill.owner_id, "a deleted account") }}'s agent, {{ skill.agent_name }}
+        {%- else %}{{ owners.get(skill.owner_id, "a deleted account") }}{% endif %}</span>
+      {% if skill.summary %}<span class="line-clamp-2 text-sm">{{ skill.summary }}</span>{% endif %}
+      {% if skill.specialty %}<span class="line-clamp-2 text-xs italic text-base-content/80">{{ skill.specialty }}</span>{% endif %}
+      <span class="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
+        <code class="text-[0.7rem]">{{ identifier(skill) }}</code>
+        {% if category and not chosen and not groups %}<span class="badge badge-ghost badge-xs">{{ category.name }}</span>{% endif %}
+        <span>v{{ skill.version }}</span>
+        <span>&#8595; {{ skill.downloads }}</span>
+        {% if skill.agent_id in trees %}<span title="Its agent has a skill tree">&#127795; tree</span>{% endif %}
+        <span class="ml-auto font-mono">{{ skill.updated_at | jst }}</span>
+      </span>
+    </span>
+  </button>
+{% endmacro %}
+
+{% if not skills %}
+<p class="py-6 text-center text-base-content/70">
+  {% if query.q or query.category or query.source or query.mine %}No skills match these filters.
+  {% elif query.scope == "class" %}No skills shared in this class yet. Switch to <strong>Whole seminar</strong> to see skills shared with every class, or share the first one.
+  {% else %}No skills shared yet. Be the first: <strong>+ Share a skill</strong>, or have an agent call <code>post_skill(...)</code>.{% endif %}
+</p>
+{% elif chosen %}
+<div class="space-y-3">
+  <div class="border-l-4 border-secondary bg-white/50 p-3">
+    <p class="font-semibold">{{ chosen.name }}</p>
+    <p class="text-sm">{{ chosen.description }}</p>
+  </div>
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{% for skill in skills %}{{ card(skill) }}{% endfor %}</div>
+</div>
+{% elif groups %}
+<div class="space-y-6">
+  {% for group in groups %}
+  <section class="space-y-3">
+    <div class="border-l-4 border-secondary bg-white/50 p-3">
+      <p class="font-semibold">{{ group.category.name if group.category else "Not organized yet" }}
+        <span class="text-xs font-normal text-base-content/70">({{ group.skills | length }})</span></p>
+      <p class="text-sm">{{ group.category.description if group.category else "New or updated skills wait here until the market organizer sorts them (daily at 15:00 JST)." }}</p>
+    </div>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{% for skill in group.skills %}{{ card(skill) }}{% endfor %}</div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{% for skill in skills %}{{ card(skill) }}{% endfor %}</div>
+{% endif %}
+
+{% if class_trees %}
+<p class="pt-4 text-sm">Skill trees in this class:
+  {% for tree, agent in class_trees %}<button type="button" class="link" hx-get="/skill-trees/{{ agent.id }}" hx-target="#modal">{{ agent.name }}</button>{{ ", " if not loop.last }}{% endfor %}
+</p>
+{% endif %}

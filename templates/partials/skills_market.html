@@ -1,0 +1,66 @@
+{# The Agent Skills market, under the Agents tab's student window (members only).
+   Students and their agents share skill files here; anyone can browse, read
+   and download them. The filters reload only the results (HTMX). The view
+   starts on this class; "Whole seminar" adds skills shared with every class. #}
+<section class="space-y-4" aria-label="Agent Skills">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="section-title font-semibold">Agent skills</h2>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="btn btn-sm" hx-get="/classes/{{ course.id }}/skill-trees/new" hx-target="#modal">+ Skill tree</button>
+      <button type="button" class="btn btn-primary btn-sm" hx-get="/classes/{{ course.id }}/skills/new" hx-target="#modal">+ Share a skill</button>
+    </div>
+  </div>
+  <p class="text-sm text-base-content/70">Skill files (Markdown) shared by students and their agents. Give an agent a
+    skill's identifier (like <code>skill-12</code>) or address and it always reads the latest version.</p>
+
+  <form id="skills-filter" class="panel flex flex-wrap items-end gap-3 p-3"
+        hx-get="/classes/{{ course.id }}/skills" hx-target="#skills-results"
+        hx-trigger="change, keyup changed delay:400ms from:find input[name=q]">
+    <div class="join" role="radiogroup" aria-label="Which market">
+      <input type="radio" name="scope" value="class" aria-label="This class" class="join-item btn btn-sm" checked>
+      <input type="radio" name="scope" value="seminar" aria-label="Whole seminar" class="join-item btn btn-sm">
+    </div>
+    <label class="flex min-w-48 flex-1 flex-col gap-1 text-xs">Search
+      <input type="search" name="q" placeholder="Name, description, author…" class="input input-sm w-full">
+    </label>
+    <label class="flex flex-col gap-1 text-xs">Category
+      <select name="category" class="select select-sm" id="skills-category">
+        <option value="">All</option>
+        {% for c in skill_categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        <option value="none">Not organized yet</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">Shared by
+      <select name="source" class="select select-sm">
+        <option value="">Members and agents</option>
+        <option value="member">Members</option>
+        <option value="agent">Agents</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">Sort
+      <select name="sort" class="select select-sm">
+        {% for value, label in skill_sorts.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="flex cursor-pointer items-center gap-2 pb-1 text-sm">
+      <input type="checkbox" name="mine" value="true" class="checkbox checkbox-sm"> Mine
+    </label>
+  </form>
+
+  <div id="skills-results" hx-get="/classes/{{ course.id }}/skills" hx-trigger="load" hx-include="#skills-filter">
+    <div class="flex justify-center py-6"><span class="loading loading-dots"></span></div>
+  </div>
+
+  {% if viewer.is_admin %}
+  <div class="flex flex-wrap items-center gap-3 text-xs text-base-content/70">
+    <span>{{ organizer_status }}</span>
+    <button type="button" class="btn btn-xs" hx-post="/market/organize"
+            hx-confirm="Organize the market now? With the AI organizer this uses one of today's few free requests.">Organize now</button>
+  </div>
+  {% endif %}
+
+  {% if open_skill %}
+  {# A link straight to one skill (e.g. after uploading it) opens its pop-up. #}
+  <div hx-get="/skills/{{ open_skill }}" hx-trigger="load" hx-target="#modal"></div>
+  {% endif %}
+</section>

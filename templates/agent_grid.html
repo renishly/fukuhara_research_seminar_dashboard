@@ -72,7 +72,7 @@
 
       {# The grid, checked every 5 seconds and only redrawn when something changed. #}
       <div hx-get="/classes/{{ course.id }}/agents/{{ owner.id }}/grid?page={{ page }}{{ folder_param }}"
-           hx-trigger="every 5s [document.visibilityState === 'visible']" hx-include="#grid-seen" hx-disinherit="*">
+           hx-trigger="every 15s [document.visibilityState === 'visible']" hx-include="#grid-seen" hx-disinherit="*">
         {% include "partials/agent_cards.html" %}
         <input type="hidden" id="grid-seen" name="seen" value="">
       </div>

@@ -317,3 +317,75 @@ def test_agent_api_errors_are_503_so_the_connector_retries(client, monkeypatch):
     reply = TestClient(app, raise_server_exceptions=False).post("/api/events", json={"message": "x"},
                                                                  headers={"X-API-Key": "some-key-0123456789-abc"})
     assert reply.status_code == 503 and "database is full" in reply.json()["detail"]
+
+
+# --- Supabase's "RLS disabled" warnings ----------------------------------------------------------
+
+
+def test_row_level_security_is_switched_on_for_owned_tables_only():
+    from contextlib import contextmanager
+    from db import enable_row_level_security
+
+    class FakeConnection:
+        def __init__(self):
+            self.sent = []
+
+        def execute(self, statement):
+            self.sent.append(str(statement))
+
+            class Rows:
+                def all(self_inner):
+                    # (table, RLS already on?, owned by this connection?)
+                    return [("user", False, True), ("course", True, True), ("agent", False, False),
+                            ("not_ours", False, True)]
+            return Rows()
+
+    class FakeEngine:
+        class dialect:
+            name = "postgresql"
+
+        def __init__(self):
+            self.connection = FakeConnection()
+
+        @contextmanager
+        def begin(self):
+            yield self.connection
+
+    fake = FakeEngine()
+    assert enable_row_level_security(fake) == ["user"]
+    alters = [s for s in fake.connection.sent if s.startswith("ALTER")]
+    # Only the site's own table that this connection owns and that hasn't got RLS yet.
+    assert alters == ['ALTER TABLE public."user" ENABLE ROW LEVEL SECURITY']
+
+
+def test_row_level_security_does_nothing_on_sqlite(engine):
+    from db import enable_row_level_security
+
+    assert enable_row_level_security(engine) == []
+
+
+# --- A lighter site: compression and caching -------------------------------------------------------
+
+
+def test_pages_and_stylesheets_are_compressed_and_cached(client, make_person):
+    from web import static_url
+
+    css = client.get(static_url("tailwind.css"), headers={"Accept-Encoding": "gzip"})
+    assert css.headers["content-encoding"] == "gzip"
+    assert css.headers["cache-control"] == "public, max-age=31536000, immutable"  # its address has a fingerprint
+    page = make_person("student").get("/classes", headers={"Accept-Encoding": "gzip"})
+    assert page.headers["content-encoding"] == "gzip" and page.headers["cache-control"] == "no-store"
+
+
+def test_downloads_are_not_compressed_again(engine, make_person, create_class):
+    from sqlmodel import select as pick
+    from db import StoredFile
+    from test_coursework import submit
+
+    course = create_class(enrolled_gens=[9])
+    student = make_person("student", "taro", gen=9)
+    submit(student, course, file=("big.pdf", b"%PDF-1.4 " + b"x" * 5000, "application/pdf"))
+    with Session(engine) as db:
+        stored = db.exec(pick(StoredFile)).one()
+    reply = student.get(f"/files/{stored.id}", headers={"Accept-Encoding": "gzip"})
+    assert "content-encoding" not in reply.headers

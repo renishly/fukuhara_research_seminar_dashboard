@@ -30,7 +30,15 @@ from routes.common import (
     visible_tasks,
 )
 from security import Viewer, checked_admin, checked_member, current_viewer, forbidden, require_admin, require_member
-from uploads import COURSEWORK_FILE_LIMIT, UploadRefused, delete_stored_file, file_response, has_file, save_upload
+from uploads import (
+    COURSEWORK_FILE_LIMIT,
+    UploadRefused,
+    delete_stored_file,
+    file_response,
+    has_file,
+    preview_response,
+    save_upload,
+)
 from web import clean_line, clean_text, hx_redirect, jst_input_value, parse_jst_input, render
 
 router = APIRouter()
@@ -438,6 +446,15 @@ def remove_submission(submission_id: int, viewer: Viewer = Depends(checked_membe
 # ---------------------------------------------------------------------------
 # File downloads: every file goes through here, after a permission check
 # ---------------------------------------------------------------------------
+
+
+@router.get("/files/{file_id}/preview")
+def preview_file(file_id: int, viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
+    """A PDF, HTML or text file shown inside the page (same permissions as downloading it)."""
+    stored = db.get(StoredFile, file_id)
+    if stored is None or not can_download_file(db, viewer, stored):
+        raise not_found("File not found")
+    return preview_response(stored)
 
 
 @router.get("/files/{file_id}")

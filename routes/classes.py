@@ -38,6 +38,7 @@ from permissions import (
     is_enrolled,
     visible_courses,
 )
+import market
 from routes.agent_tools import is_online
 from routes.common import (
     delete_course,
@@ -368,27 +369,30 @@ def agents_window(db: Session, viewer: Viewer, course: Course) -> dict:
     return {"groups": groups}
 
 
-def tab_context(db: Session, viewer: Viewer, course: Course, tab: str) -> dict:
+def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skill: int | None = None) -> dict:
     """One tab's content (404 for a tab this class doesn't have)."""
     if tab not in course_tabs(course):
         raise not_found()
     context = {"course": course, "tab": tab, "tabs": course_tabs(course), "can_manage": can_manage_classes(viewer),
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
     if tab == "agents":
+        if viewer.is_member:  # the Agent Skills market, under the student window
+            context |= {"skill_categories": market.categories(db), "skill_sorts": market.SORTS,
+                        "organizer_status": market.schedule_message(db), "open_skill": open_skill}
         return context | agents_window(db, viewer, course)
     kind = kind_of(tab, course)
     return context | {"kind": kind} | coursework_window(db, viewer, course, kind)
 
 
 @router.get("/classes/{course_id}")
-def class_page(request: Request, course_id: int, tab: str = "assignments",
+def class_page(request: Request, course_id: int, tab: str = "assignments", skill: int | None = None,
                viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
     mark_class_seen(db, viewer, course)
     tab = tab if tab in course_tabs(course) else "assignments"
     return render(request, db, viewer, "class.html", summary=enrolment_summary(db, course),
                   ended=month_number(course.end_month) < month_number(today_jst()),
-                  **tab_context(db, viewer, course, tab))
+                  **tab_context(db, viewer, course, tab, open_skill=skill))
 
 
 @router.get("/classes/{course_id}/tab/{tab}")

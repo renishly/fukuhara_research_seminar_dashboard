@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from sqlalchemy import JSON, Column, UniqueConstraint, inspect, text
+from sqlalchemy import JSON, Column, Text, UniqueConstraint, inspect, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 # Load secrets from the .env file into environment variables. This lives here
@@ -374,6 +374,79 @@ class InboxFile(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
+# The Agent Skills market
+# ---------------------------------------------------------------------------
+
+
+class SkillCategory(SQLModel, table=True):
+    """A category of skills by what they do (e.g. "Data retrieval"), with a
+    description of what skills in it are expected to do. Written by the market
+    organizer (see market.py), which updates them once or twice a day."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    description: str = ""
+    position: int = 0  # the order categories are listed in
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Skill(SQLModel, table=True):
+    """A skill file (Markdown, e.g. "skills.md") shared on the market.
+
+    Posted by a member directly, or by one of their agents through the API;
+    either way it is credited to the member, and also to the agent if an
+    agent posted it. Its identifier is "skill-<id>" (see market.py), and
+    reading it always gives the latest version.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    course_id: int = Field(foreign_key="course.id", index=True)  # the class it was posted in
+    share: str = "class"  # "class": that class only; "seminar": every class's market
+    owner_id: int = Field(foreign_key="user.id", index=True)  # the member it is credited to
+    agent_id: int | None = Field(default=None, foreign_key="agent.id", index=True)  # set if an agent posted it
+    agent_name: str | None = None  # kept for the credit line, even if the agent is renamed or deleted later
+    name: str
+    summary: str | None = None  # the author's short description
+    content: str = Field(sa_column=Column(Text, nullable=False))
+    version: int = 1  # goes up each time the content is replaced
+    downloads: int = 0
+    # Written by the market organizer:
+    category_id: int | None = Field(default=None, foreign_key="skillcategory.id")
+    specialty: str | None = None  # what sets this skill apart from others in its category
+    organized_version: int | None = None  # which version the organizer last looked at
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class SkillTree(SQLModel, table=True):
+    """An agent's "skill tree": the big-picture description of where each of
+    its skills (shared on the market or not) fits and is used in the agent.
+    One per agent; uploading again replaces it."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", unique=True)
+    owner_id: int = Field(foreign_key="user.id", index=True)
+    content: str = Field(sa_column=Column(Text, nullable=False))
+    version: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class OrganizerRun(SQLModel, table=True):
+    """One run of the market organizer, kept to schedule the next ones (at most
+    two a day, one at 15:00 JST) and to show admins how the last one went."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    jst_date: str = Field(index=True)  # e.g. "2026-10-30", the day in Japan
+    trigger: str  # "3 pm", "morning", "manual" or "github"
+    method: str  # "ai" (OpenRouter) or "rules" (built-in keyword rules)
+    ok: bool = False
+    message: str = ""
+    started_at: datetime = Field(default_factory=utc_now)
+    finished_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
 # Connecting, creating tables, and the first gens
 # ---------------------------------------------------------------------------
 
@@ -417,6 +490,7 @@ def create_db_and_tables(target_engine=None) -> None:
     target_engine = target_engine or engine
     SQLModel.metadata.create_all(target_engine)
     add_missing_columns(target_engine)
+    enable_row_level_security(target_engine)
     with Session(target_engine) as session:
         seed_gens(session)
         move_legacy_monitors(session)
@@ -459,6 +533,43 @@ def move_legacy_monitors(session: Session) -> None:
         agent.pinned_monitor = False
         session.add(agent)
     session.commit()
+
+
+def enable_row_level_security(target_engine=None) -> list[str]:
+    """Switch on Postgres "row level security" (RLS) for every table of the site.
+
+    Why: Supabase also offers every table in the "public" schema through its
+    own automatic web API (PostgREST). With RLS on and no rules ("policies"),
+    that API can read and change nothing, so the tables are only reachable
+    through this site. The site itself is unaffected: it connects as the
+    tables' owner, and Postgres doesn't apply RLS to a table's owner.
+
+    Only tables this connection owns are changed (otherwise the site could
+    lock itself out); others are reported in the log. SQLite has no RLS, so
+    there this does nothing. Returns the names of the tables it switched on.
+    """
+    target_engine = target_engine or engine
+    if target_engine.dialect.name != "postgresql":
+        return []
+    names = [table.name for table in SQLModel.metadata.sorted_tables]
+    switched_on = []
+    with target_engine.begin() as connection:
+        rows = connection.execute(text(
+            "SELECT c.relname, c.relrowsecurity, pg_get_userbyid(c.relowner) = current_user "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind = 'r'"
+        )).all()
+        for name, has_rls, owned in rows:
+            if name not in names or has_rls:
+                continue
+            if not owned:
+                print(f"Database: can't switch on row level security for {name}: this connection doesn't own it")
+                continue
+            connection.execute(text(f'ALTER TABLE public."{name}" ENABLE ROW LEVEL SECURITY'))
+            switched_on.append(name)
+    if switched_on:
+        print(f"Database: switched on row level security for {len(switched_on)} tables")
+    return switched_on
 
 
 def _sql_literal(value) -> str | None:

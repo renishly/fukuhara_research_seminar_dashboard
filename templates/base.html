@@ -9,10 +9,11 @@
      too: forms come back with their error, and other errors as a pop-up. #}
   <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "[45]..", "swap": true, "error": true}]}'>
 
-  <!-- IBM Plex Mono (Latin) and IBM Plex Sans JP (Japanese) from Google Fonts -->
+  <!-- IBM Plex Mono (Latin) and IBM Plex Sans JP (Japanese) from Google Fonts,
+       in two weights each (regular and bold) to keep the download small. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=IBM+Plex+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 
   <!-- Tailwind CSS + daisyUI, built ahead of time from tailwind.input.css -->
   <link href="{{ static_url('tailwind.css') }}" rel="stylesheet">

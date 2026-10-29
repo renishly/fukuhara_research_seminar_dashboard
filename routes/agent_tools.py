@@ -124,6 +124,48 @@ def latest_output(db: Session, agent_id: int, category: str) -> Output | None:
     ).first()
 
 
+def newest_per(db: Session, model, group_columns, where) -> list:
+    """The newest row of `model` for each group (e.g. each agent), in ONE
+    database query instead of one per group. It numbers each group's rows from
+    the newest (a "window function", supported by Postgres and SQLite) and
+    keeps row 1."""
+    number = func.row_number().over(partition_by=group_columns, order_by=(model.created_at.desc(), model.id.desc()))
+    ranked = select(model.id, number.label("n")).where(*where).subquery()
+    ids = db.exec(select(ranked.c.id).where(ranked.c.n == 1)).all()
+    return list(db.exec(select(model).where(model.id.in_(ids))).all()) if ids else []
+
+
+def grid_details(db: Session, agents: list[Agent]) -> dict[int, dict]:
+    """For a page of agent cards: each agent's latest activity line, folder tags
+    and pinned item, in a handful of queries for the whole page (not three per card)."""
+    ids = [agent.id for agent in agents]
+    details = {agent_id: {"latest": None, "folders": [], "pinned": None} for agent_id in ids}
+    if not ids:
+        return details
+    for event in newest_per(db, Event, [Event.agent_id], [Event.agent_id.in_(ids)]):
+        details[event.agent_id]["latest"] = event
+    for agent_id, folder in db.exec(
+        select(AgentFolder.agent_id, Folder).join(Folder, Folder.id == AgentFolder.folder_id)
+        .where(AgentFolder.agent_id.in_(ids)).order_by(Folder.name)
+    ).all():
+        details[agent_id]["folders"].append(folder)
+    categories = {agent.pinned_category for agent in agents if agent.pinned_category}
+    if categories:
+        pinned = {(a.id, a.pinned_category) for a in agents if a.pinned_category}
+        for output in newest_per(db, Output, [Output.agent_id, Output.category],
+                                 [Output.agent_id.in_(ids), Output.category.in_(categories)]):
+            if (output.agent_id, output.category) in pinned:
+                details[output.agent_id]["pinned"] = output
+    monitor_names_pinned = {a.pinned_monitor_name for a in agents if a.pinned_monitor_name and not a.pinned_category}
+    if monitor_names_pinned:
+        wanted = {(a.id, a.pinned_monitor_name) for a in agents if a.pinned_monitor_name and not a.pinned_category}
+        for monitor in db.exec(select(Monitor).where(Monitor.agent_id.in_(ids),
+                                                     Monitor.name.in_(monitor_names_pinned))).all():
+            if (monitor.agent_id, monitor.name) in wanted:
+                details[monitor.agent_id]["pinned"] = monitor
+    return details
+
+
 def folders_of(db: Session, agent_id: int) -> list[Folder]:
     """The folders an agent is tagged with, A to Z."""
     return list(db.exec(

@@ -42,7 +42,7 @@
       </div>
     </div>
     <div id="{{ s }}-list" hx-get="/agents/{{ f.agent.id }}/{{ s }}"
-         hx-trigger="every {{ 3 if s == 'outputs' else 5 }}s [document.visibilityState === 'visible']"
+         hx-trigger="every {{ 10 if s == 'outputs' else 15 }}s [document.visibilityState === 'visible']"
          hx-include="#{{ s }}-filter, #{{ s }}-seen" hx-swap="innerHTML">
       {% include "partials/feed_list.html" %}
       <input type="hidden" id="{{ s }}-seen" name="seen" value="">

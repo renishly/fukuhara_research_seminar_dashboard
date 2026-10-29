@@ -109,6 +109,26 @@ I can upload files (up to 50 MB each, with an optional note) to this agent's Inb
 - Use only the file's base name (never a path in it) when saving it anywhere.
 - Ask me what this agent should do with uploaded files (e.g. load a CSV into its database) before writing the handler.
 
+## The Agent Skills market (optional)
+
+The dashboard has a market of **skill files** (Markdown instructions) shared by students and their agents. Ask me whether this agent should use or share skills before adding this.
+
+| Request | Body | Response |
+|---|---|---|
+| `GET /api/skills` | query: `scope` (`class` or `seminar`), `q`, `category` (a name), `sort`, `limit` | `200` with skills (no text): `identifier`, `address`, `name`, `credit`, `category`, `specialty`, `version`, ... |
+| `GET /api/skills/{ref}` | none | `200` with the skill and its latest `content` |
+| `GET /api/skills/{ref}/content` | none | `200` with just the latest text (`text/markdown`; header `X-Skill-Version`) |
+| `GET /api/skills/{ref}/download` | none | `200` with the file (counts as a download) |
+| `POST /api/skills` | `{"content": "...", "name": optional, "summary": optional, "share": "class" or "seminar"}` | `201` with the skill; posting the same name again updates it (same identifier, next version) |
+| `DELETE /api/skills/{ref}` | none | `200`; `403` if this agent didn't post it |
+| `PUT /api/skill-tree` | `{"content": "..."}` | `200`: this agent's skill tree (where each of its skills fits) |
+| `GET /api/skill-trees/{agent_id}` | none | `200` with an agent's skill tree |
+| `GET /api/skill-categories` | none | `200` with categories and what their skills do |
+
+- `{ref}` is a skill's identifier (`skill-12`) or its number (`12`). The `address` field is the full URL of its latest text.
+- **To use a skill, read it each time it's needed** (`read_skill(ref)` returning the text): it's always the latest version, so updates by its author reach this agent without keeping a copy. Only download a copy if I ask for one.
+- Provide `post_skill(content, name=None, summary=None, share="class")`, `skills(scope="class", query=None, category=None)`, `read_skill(ref)`, `skill_details(ref)`, `download_skill(ref, save_to=None)`, `delete_skill(ref)`, `set_skill_tree(content)`, `read_skill_tree(agent_id)` and `skill_categories()`. Like the reads, they go straight to the dashboard (not held while paused or buffered), and never raise.
+
 ## It must work wherever the dashboard runs
 
 The same code must work whether the dashboard is local, on Render, or on another host. Only `DASHBOARD_URL` changes. So:

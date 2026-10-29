@@ -6,7 +6,7 @@ Fukuhara Research Seminar Dashboard, v1. Produced on 2026-10-08 (updated after m
 
 All tests use an in-memory SQLite database, a temporary folder for files, and test values for every secret (see `tests/conftest.py`). They never touch `local.db`, `local_files/` or `.env`.
 
-### `test_auth.py` (32 tests)
+### `test_auth.py` (36 tests)
 
 | Test | What it checks |
 |---|---|
@@ -42,6 +42,10 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_full_database_gives_a_friendly_page_and_toast` | When the database is read-only (full), pages and HTMX buttons get a plain "database is full" message (503), not "Internal Server Error". |
 | `test_unexpected_errors_get_a_plain_message` | Any other unexpected error shows "Something went wrong" (500). |
 | `test_agent_api_errors_are_503_so_the_connector_retries` | The agent API answers 503 with the message, so connectors buffer and retry. |
+| `test_row_level_security_is_switched_on_for_owned_tables_only` | On Postgres, row level security is switched on for the site's tables that this connection owns and that don't have it yet (Supabase's "RLS disabled" warnings); checked with a stand-in connection. |
+| `test_row_level_security_does_nothing_on_sqlite` | On SQLite (no RLS) nothing is changed. |
+| `test_pages_and_stylesheets_are_compressed_and_cached` | Pages and stylesheets are gzip-compressed; fingerprinted static files may be cached for a year, pages never. |
+| `test_downloads_are_not_compressed_again` | Downloads such as PDFs are sent as they are, not compressed again. |
 
 ### `test_classes.py` (24 tests)
 
@@ -72,7 +76,7 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_existing_classes_get_all_three_tabs` | Classes created before the switches existed get both switched on when the columns are added. |
 | `test_hidden_exam_submissions_dont_mark_the_class_as_new` | Exam submissions in a class with Exams switched off don't put a notification mark on it. |
 
-### `test_coursework.py` (35 tests)
+### `test_coursework.py` (38 tests)
 
 | Test | What it checks |
 |---|---|
@@ -111,8 +115,11 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_supabase_refusals_are_explained` | When Supabase refuses (wrong bucket, wrong key), the form and the Members page show Supabase's own reason, and nothing is half-saved. |
 | `test_storage_check_warns_about_render_without_supabase` | On Render without Supabase settings, the Members page warns that files are on a temporary disk and will be lost. |
 | `test_a_missing_file_gives_a_clear_message` | A file missing from storage gives a clear 404 message instead of a broken download. |
+| `test_pdfs_html_and_text_can_be_previewed` | PDFs preview in the browser's viewer; HTML and text preview under a sandbox policy with no scripts; other files stay downloads; the page shows Preview buttons. |
+| `test_a_fake_pdf_is_not_previewed` | A file that only claims to be a PDF isn't previewed. |
+| `test_previews_follow_download_permissions` | Previews have the same permissions as downloads (an unticked file is 404 for guests). |
 
-### `test_agents.py` (45 tests)
+### `test_agents.py` (46 tests)
 
 | Test | What it checks |
 |---|---|
@@ -161,6 +168,7 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_filter_choices_are_remembered_per_member_agent_and_feed` | Each member's Filter choices (ticks, All, sort) are saved per agent and per feed and are back on the next visit; other members start from the owner's choices until they choose their own, which don't change the owner's. |
 | `test_background_refreshes_without_the_filter_change_nothing` | Refreshes that don't carry the Filter, or carry the same choices, don't rewrite the saved choices. |
 | `test_a_non_owners_choices_are_not_a_preset_for_others` | Only the owner's choices are a starting point for others; another member's choices aren't. |
+| `test_connector_shares_reads_and_trees_skills` | The real connector shares, updates, reads (always the latest), lists, downloads and deletes skills, and sets and reads a skill tree. |
 
 ### `test_guests.py` (12 tests)
 
@@ -197,6 +205,29 @@ All tests use an in-memory SQLite database, a temporary folder for files, and te
 | `test_database_breakdown_estimates_by_class_person_and_agent` | The database breakdown estimates each agent's, person's and class's share from the text they store, and says it's an estimate. |
 | `test_breakdowns_are_for_admins_only` | Breakdowns load only for admins (students and guests get 403), and only when opened. |
 
+### `test_skills.py` (18 tests)
+
+| Test | What it checks |
+|---|---|
+| `test_a_member_shares_a_skill_and_it_appears_with_its_identifier` | A member shares a skill; it's listed with its identifier and credit, and its page shows the identifier, address, connector call and text. |
+| `test_sharing_again_with_the_same_name_updates_it` | Sharing again with the same name updates the skill (next version, same identifier). |
+| `test_skill_files_are_checked` | Empty or over-100 KB skill files are refused. |
+| `test_downloading_counts` | Downloading gives the file and counts it. |
+| `test_class_only_and_seminar_wide_skills` | Class-only skills show only in their class; seminar-wide ones also in every class's Whole seminar view and in their own class; a student who can't see the origin class still sees seminar-wide skills. |
+| `test_the_market_is_for_members_only` | Guests can't see, open, download or share skills, and the market isn't shown to them. |
+| `test_only_its_member_edits_and_admins_can_remove` | Only the member a skill is credited to edits it; others are refused; admins can remove any skill. |
+| `test_filters_search_source_and_mine` | Search, shared-by (members or agents), Mine and sorting by name work. |
+| `test_agents_post_read_update_and_download_skills` | Agents post skills (credited "from X's agent, Y"), update them by name, read the latest text by identifier, download (counted) and list them. |
+| `test_agents_only_delete_their_own_skills` | An agent can delete only skills it posted (403 otherwise). |
+| `test_agents_see_skills_as_their_owner_does` | Agents see the market as their owner does; unknown skills are 404 and wrong keys 401. |
+| `test_skill_trees` | Skill trees are set by an agent or its owner on the page (not by others), readable through the API and shown with the agent's skills. |
+| `test_deleting_an_agent_keeps_its_skills_credited` | Deleting an agent keeps its shared skills, still credited to it, and removes its skill tree. |
+| `test_keyword_rules_sort_skills_by_function` | Without an AI key, keyword rules sort skills by function (data retrieval apart from decision frameworks); the market groups them with each category's description, or shows one category's description on top; only admins can organize now. |
+| `test_the_ai_organizer_uses_one_request_and_applies_its_answer` | With a key, the organizer sends exactly one request (stand-in reply, no real call) and applies its categories, descriptions and specialties. |
+| `test_a_bad_ai_answer_changes_nothing_and_the_daily_limit_holds` | An unusable AI reply changes nothing, and no more than two AI requests are made a day. |
+| `test_the_schedule_always_runs_at_3pm_and_once_more_only_if_needed` | An update is due at 15:00 JST every day (also catching up later that day), and around 03:00 only if skills changed. |
+| `test_the_daily_timer_needs_its_token` | The timer's organizer address needs the right ORGANIZER_TOKEN (and never matches an empty one). |
+
 ## 2. Result of `pytest -v`
 
 Run with `.venv/bin/python -m pytest -v` (Python 3.12.3, macOS).
@@ -206,164 +237,190 @@ tests/test_agents.py::test_only_the_owner_gets_add_agent_controls_settings_and_i
 tests/test_agents.py::test_owner_only_routes_refuse_everyone_else PASSED [  1%]
 tests/test_agents.py::test_members_can_read_other_agents_but_guests_only_see_the_grid PASSED [  1%]
 tests/test_agents.py::test_non_owners_cannot_post_controls_as_guests PASSED [  2%]
-tests/test_agents.py::test_agents_tab_shows_last_connection PASSED       [  3%]
+tests/test_agents.py::test_agents_tab_shows_last_connection PASSED       [  2%]
 tests/test_agents.py::test_blank_key_generates_one_and_typed_keys_follow_the_rules PASSED [  3%]
-tests/test_agents.py::test_key_is_stored_hashed_and_encrypted_and_can_be_viewed PASSED [  4%]
+tests/test_agents.py::test_key_is_stored_hashed_and_encrypted_and_can_be_viewed PASSED [  3%]
 tests/test_agents.py::test_replace_key_stops_the_old_one PASSED          [  4%]
-tests/test_agents.py::test_renaming_keeps_the_key PASSED                 [  5%]
-tests/test_agents.py::test_names_are_unique_per_owner_per_class PASSED   [  6%]
-tests/test_agents.py::test_delete_agent_needs_the_password_and_deletes_everything PASSED [  6%]
-tests/test_agents.py::test_unknown_empty_or_missing_keys_get_401 PASSED  [  7%]
-tests/test_agents.py::test_check_in_every_limits PASSED                  [  8%]
-tests/test_agents.py::test_online_status_uses_the_interval_plus_slack PASSED [  8%]
-tests/test_agents.py::test_late_items_land_at_their_real_time PASSED     [  9%]
-tests/test_agents.py::test_late_monitor_update_older_than_the_current_one_is_skipped PASSED [  9%]
-tests/test_agents.py::test_commands_start_pause_and_messages PASSED      [ 10%]
-tests/test_agents.py::test_agents_only_see_and_update_their_own_commands PASSED [ 11%]
-tests/test_agents.py::test_messages_ready_check_reloads_the_page_when_it_changes PASSED [ 11%]
-tests/test_agents.py::test_inbox_is_refused_until_opted_in_and_confirming_deletes_the_file PASSED [ 12%]
-tests/test_agents.py::test_inbox_files_are_only_for_that_agent PASSED    [ 13%]
-tests/test_agents.py::test_output_kinds_and_file_limits PASSED           [ 13%]
-tests/test_agents.py::test_monitor_pdf_is_shown_inline_and_replaced PASSED [ 14%]
-tests/test_agents.py::test_reading_by_me_id_and_name_within_the_class PASSED [ 14%]
-tests/test_agents.py::test_shared_name_in_a_class_gets_409_with_ids PASSED [ 15%]
-tests/test_agents.py::test_reading_outputs_and_activity_with_filters PASSED [ 16%]
-tests/test_agents.py::test_file_outputs_can_be_downloaded_by_agents_in_the_class PASSED [ 16%]
-tests/test_agents.py::test_agents_delete_only_their_own_data PASSED      [ 17%]
-tests/test_agents.py::test_reads_never_include_commands_or_inbox PASSED  [ 18%]
-tests/test_agents.py::test_outputs_filter_pin_and_bell PASSED            [ 18%]
-tests/test_agents.py::test_an_agent_has_many_monitors_each_replaced_not_added PASSED [ 19%]
-tests/test_agents.py::test_monitors_have_the_same_filter_pins_and_bells_as_outputs PASSED [ 19%]
-tests/test_agents.py::test_owner_sets_and_removes_link_monitors_in_settings PASSED [ 20%]
-tests/test_agents.py::test_agents_read_monitors_of_their_class_only PASSED [ 21%]
-tests/test_agents.py::test_monitor_cap_per_agent PASSED                  [ 21%]
-tests/test_agents.py::test_older_connectors_single_monitor_still_works PASSED [ 22%]
-tests/test_agents.py::test_a_legacy_single_monitor_is_moved_into_the_monitor_table PASSED [ 22%]
-tests/test_agents.py::test_deleting_an_agent_deletes_its_monitors_and_their_files PASSED [ 23%]
-tests/test_agents.py::test_connector_holds_outputs_while_paused_and_sends_them_on_start PASSED [ 24%]
-tests/test_agents.py::test_connector_opts_in_to_messages_and_inbox PASSED [ 24%]
-tests/test_agents.py::test_each_agent_keeps_only_the_newest_outputs_and_activity PASSED [ 25%]
-tests/test_agents.py::test_connector_sets_named_monitors_and_buffers_only_the_newest_value_each PASSED [ 26%]
-tests/test_agents.py::test_filter_choices_are_remembered_per_member_agent_and_feed PASSED [ 26%]
-tests/test_agents.py::test_background_refreshes_without_the_filter_change_nothing PASSED [ 27%]
-tests/test_agents.py::test_a_non_owners_choices_are_not_a_preset_for_others PASSED [ 27%]
-tests/test_auth.py::test_gens_1_to_12_exist_before_anyone_registers PASSED [ 28%]
-tests/test_auth.py::test_register_page_lists_gens_newest_first PASSED    [ 29%]
-tests/test_auth.py::test_database_url_scheme_is_converted PASSED         [ 29%]
-tests/test_auth.py::test_add_missing_columns_adds_new_fields_with_their_defaults PASSED [ 30%]
-tests/test_auth.py::test_passwords_are_stored_as_salted_scrypt_hashes PASSED [ 31%]
-tests/test_auth.py::test_student_and_admin_register_with_their_own_keys PASSED [ 31%]
-tests/test_auth.py::test_wrong_or_missing_key_is_refused PASSED          [ 32%]
-tests/test_auth.py::test_unset_key_switches_registration_off PASSED      [ 32%]
-tests/test_auth.py::test_identical_keys_are_refused PASSED               [ 33%]
-tests/test_auth.py::test_student_must_choose_a_gen PASSED                [ 34%]
-tests/test_auth.py::test_login_id_rules_and_duplicates_in_any_case PASSED [ 34%]
-tests/test_auth.py::test_password_rules PASSED                           [ 35%]
-tests/test_auth.py::test_login_needs_no_key_and_uses_the_login_id PASSED [ 36%]
-tests/test_auth.py::test_login_failure_never_says_which_part_was_wrong PASSED [ 36%]
-tests/test_auth.py::test_signed_out_browser_goes_to_login_and_comes_back PASSED [ 37%]
-tests/test_auth.py::test_root_goes_to_classes_when_signed_in PASSED      [ 37%]
-tests/test_auth.py::test_pages_are_never_stored_by_browsers PASSED       [ 38%]
-tests/test_auth.py::test_cookie_is_httponly_and_lax PASSED               [ 39%]
-tests/test_auth.py::test_logout_ends_only_this_device PASSED             [ 39%]
-tests/test_auth.py::test_sign_out_all_devices PASSED                     [ 40%]
-tests/test_auth.py::test_expired_sign_in_no_longer_works PASSED          [ 40%]
-tests/test_auth.py::test_guest_visit_lasts_one_day PASSED                [ 41%]
-tests/test_auth.py::test_password_change_signs_other_devices_out PASSED  [ 42%]
-tests/test_auth.py::test_rate_limit_after_ten_failures PASSED            [ 42%]
-tests/test_auth.py::test_wrong_registration_keys_count_towards_the_rate_limit PASSED [ 43%]
-tests/test_auth.py::test_post_without_csrf_token_gets_403 PASSED         [ 44%]
-tests/test_auth.py::test_csrf_token_in_a_plain_form_field_works PASSED   [ 44%]
-tests/test_auth.py::test_account_page_is_for_members_only PASSED         [ 45%]
-tests/test_auth.py::test_other_names_are_limited_to_ten PASSED           [ 45%]
-tests/test_auth.py::test_full_database_gives_a_friendly_page_and_toast PASSED [ 46%]
-tests/test_auth.py::test_unexpected_errors_get_a_plain_message PASSED    [ 47%]
-tests/test_auth.py::test_agent_api_errors_are_503_so_the_connector_retries PASSED [ 47%]
-tests/test_classes.py::test_class_visibility_for_every_kind_of_viewer PASSED [ 48%]
-tests/test_classes.py::test_gen_enrolment_includes_students_who_register_later PASSED [ 49%]
-tests/test_classes.py::test_hidden_class_looks_like_a_missing_one PASSED [ 49%]
-tests/test_classes.py::test_only_admins_create_edit_and_delete_classes PASSED [ 50%]
-tests/test_classes.py::test_class_form_checks_its_fields PASSED          [ 50%]
-tests/test_classes.py::test_automatic_label_when_there_is_no_title PASSED [ 51%]
-tests/test_classes.py::test_class_page_shows_info_tabs_and_enrolment_summary PASSED [ 52%]
-tests/test_classes.py::test_overlapping_classes_never_share_a_lane PASSED [ 52%]
-tests/test_classes.py::test_three_or_more_overlapping_classes_add_lanes PASSED [ 53%]
-tests/test_classes.py::test_non_overlapping_classes_reuse_lanes PASSED   [ 54%]
-tests/test_classes.py::test_timeline_boxes_never_overlap_at_any_zoom PASSED [ 54%]
-tests/test_classes.py::test_timeline_reaches_back_to_the_oldest_class_and_three_years_forward PASSED [ 55%]
-tests/test_classes.py::test_a_tick_on_every_friday_on_its_exact_date PASSED [ 55%]
-tests/test_classes.py::test_timeline_page_and_zoom PASSED                [ 56%]
-tests/test_classes.py::test_enrolled_and_ended_badges_on_the_timeline PASSED [ 57%]
-tests/test_classes.py::test_times_are_shown_in_jst PASSED                [ 57%]
-tests/test_classes.py::test_relative_times PASSED                        [ 58%]
-tests/test_classes.py::test_html_in_class_text_is_escaped PASSED         [ 59%]
-tests/test_classes.py::test_classes_have_the_tabs_ticked_at_creation PASSED [ 59%]
-tests/test_classes.py::test_switched_off_tabs_and_their_pages_are_not_found PASSED [ 60%]
-tests/test_classes.py::test_switching_a_tab_off_hides_its_data_and_on_brings_it_back PASSED [ 60%]
-tests/test_classes.py::test_the_class_form_has_the_tabs_ticked_by_default PASSED [ 61%]
-tests/test_classes.py::test_existing_classes_get_all_three_tabs PASSED   [ 62%]
-tests/test_classes.py::test_hidden_exam_submissions_dont_mark_the_class_as_new PASSED [ 62%]
-tests/test_coursework.py::test_only_admins_post_edit_and_delete_tasks PASSED [ 63%]
-tests/test_coursework.py::test_assignments_and_exams_are_kept_apart PASSED [ 63%]
-tests/test_coursework.py::test_task_needs_title_due_time_and_content PASSED [ 64%]
-tests/test_coursework.py::test_task_with_a_file_keeps_exactly_one_kind_of_content PASSED [ 65%]
-tests/test_coursework.py::test_due_indicator PASSED                      [ 65%]
-tests/test_coursework.py::test_bar_shows_the_latest_task_with_its_indicator PASSED [ 66%]
-tests/test_coursework.py::test_polling_answers_204_when_nothing_changed PASSED [ 67%]
-tests/test_coursework.py::test_enrolled_student_submits_and_it_appears_everywhere PASSED [ 67%]
-tests/test_coursework.py::test_only_enrolled_students_can_submit PASSED  [ 68%]
-tests/test_coursework.py::test_only_the_owner_edits_or_deletes_a_submission PASSED [ 68%]
-tests/test_coursework.py::test_admins_can_delete_any_submission PASSED   [ 69%]
-tests/test_coursework.py::test_link_only_to_a_task_of_the_same_class_and_kind PASSED [ 70%]
-tests/test_coursework.py::test_submission_without_a_task_is_fine PASSED  [ 70%]
-tests/test_coursework.py::test_submission_content_is_text_or_file PASSED [ 71%]
-tests/test_coursework.py::test_late_badge PASSED                         [ 72%]
-tests/test_coursework.py::test_dropdown_lists_five_recent_tasks_then_older PASSED [ 72%]
-tests/test_coursework.py::test_file_download_headers PASSED              [ 73%]
-tests/test_coursework.py::test_images_may_show_inline PASSED             [ 73%]
-tests/test_coursework.py::test_files_are_kept_in_file_storage_not_the_database PASSED [ 74%]
-tests/test_coursework.py::test_deleting_a_submission_deletes_its_file PASSED [ 75%]
-tests/test_coursework.py::test_file_size_limit PASSED                    [ 75%]
-tests/test_coursework.py::test_uploads_stop_when_storage_is_nearly_full PASSED [ 76%]
-tests/test_coursework.py::test_file_permissions PASSED                   [ 77%]
-tests/test_coursework.py::test_text_content_is_shown_as_plain_text PASSED [ 77%]
-tests/test_coursework.py::test_deleting_a_class_deletes_its_files PASSED [ 78%]
-tests/test_coursework.py::test_deleting_a_task_keeps_its_submissions PASSED [ 78%]
-tests/test_coursework.py::test_due_time_is_entered_and_shown_in_jst PASSED [ 79%]
-tests/test_coursework.py::test_new_submission_marks_the_class_until_its_page_is_opened PASSED [ 80%]
-tests/test_coursework.py::test_new_members_only_see_marks_for_submissions_after_they_registered PASSED [ 80%]
-tests/test_coursework.py::test_guests_get_no_notification_marks PASSED   [ 81%]
-tests/test_coursework.py::test_supabase_keys_are_sent_the_way_each_kind_needs PASSED [ 81%]
-tests/test_coursework.py::test_files_go_to_supabase_storage_and_back PASSED [ 82%]
-tests/test_coursework.py::test_supabase_refusals_are_explained PASSED    [ 83%]
-tests/test_coursework.py::test_storage_check_warns_about_render_without_supabase PASSED [ 83%]
-tests/test_coursework.py::test_a_missing_file_gives_a_clear_message PASSED [ 84%]
-tests/test_guests.py::test_placeholders_are_fixed_and_never_reused PASSED [ 85%]
-tests/test_guests.py::test_name_search_catches_parts_case_widths_and_other_names PASSED [ 85%]
-tests/test_guests.py::test_members_always_see_the_original_text PASSED   [ 86%]
-tests/test_guests.py::test_guests_never_see_a_real_name_or_login_id_anywhere PASSED [ 86%]
-tests/test_guests.py::test_unticked_items_do_not_exist_for_guests PASSED [ 87%]
-tests/test_guests.py::test_ticked_submissions_are_shown_in_full PASSED   [ 88%]
-tests/test_guests.py::test_ticked_submission_linked_to_a_hidden_task_shows_no_link PASSED [ 88%]
-tests/test_guests.py::test_class_hidden_from_guests_hides_everything_in_it PASSED [ 89%]
-tests/test_guests.py::test_guest_cell_shows_the_latest_guest_visible_submission PASSED [ 90%]
-tests/test_guests.py::test_visible_to_guests_checkbox_warns_about_files PASSED [ 90%]
-tests/test_guests.py::test_guests_are_refused_on_every_upload_edit_and_control_route PASSED [ 91%]
-tests/test_guests.py::test_guests_never_see_the_members_page_or_login_ids PASSED [ 91%]
-tests/test_members.py::test_members_page_groups_accounts_and_shows_storage PASSED [ 92%]
-tests/test_members.py::test_admin_changes_name_and_gen PASSED            [ 93%]
-tests/test_members.py::test_reset_password_shows_it_once_and_signs_the_member_out PASSED [ 93%]
-tests/test_members.py::test_delete_account_needs_the_admin_password_and_removes_their_data PASSED [ 94%]
-tests/test_members.py::test_admins_cannot_delete_themselves PASSED       [ 95%]
-tests/test_members.py::test_add_the_next_gen PASSED                      [ 95%]
-tests/test_members.py::test_folders_belong_to_their_student_and_are_shared_across_classes PASSED [ 96%]
-tests/test_members.py::test_grid_pages_hold_nine_cells_including_add_agent PASSED [ 96%]
-tests/test_members.py::test_members_page_shows_the_database_size PASSED  [ 97%]
-tests/test_members.py::test_file_storage_breakdown_by_type_class_person_agent_and_largest PASSED [ 98%]
-tests/test_members.py::test_pie_gives_six_colours_then_other PASSED      [ 98%]
-tests/test_members.py::test_database_breakdown_estimates_by_class_person_and_agent PASSED [ 99%]
-tests/test_members.py::test_breakdowns_are_for_admins_only PASSED        [100%]
-============================= 161 passed in 29.22s =============================
+tests/test_agents.py::test_renaming_keeps_the_key PASSED                 [  4%]
+tests/test_agents.py::test_names_are_unique_per_owner_per_class PASSED   [  5%]
+tests/test_agents.py::test_delete_agent_needs_the_password_and_deletes_everything PASSED [  5%]
+tests/test_agents.py::test_unknown_empty_or_missing_keys_get_401 PASSED  [  6%]
+tests/test_agents.py::test_check_in_every_limits PASSED                  [  6%]
+tests/test_agents.py::test_online_status_uses_the_interval_plus_slack PASSED [  7%]
+tests/test_agents.py::test_late_items_land_at_their_real_time PASSED     [  8%]
+tests/test_agents.py::test_late_monitor_update_older_than_the_current_one_is_skipped PASSED [  8%]
+tests/test_agents.py::test_commands_start_pause_and_messages PASSED      [  9%]
+tests/test_agents.py::test_agents_only_see_and_update_their_own_commands PASSED [  9%]
+tests/test_agents.py::test_messages_ready_check_reloads_the_page_when_it_changes PASSED [ 10%]
+tests/test_agents.py::test_inbox_is_refused_until_opted_in_and_confirming_deletes_the_file PASSED [ 10%]
+tests/test_agents.py::test_inbox_files_are_only_for_that_agent PASSED    [ 11%]
+tests/test_agents.py::test_output_kinds_and_file_limits PASSED           [ 11%]
+tests/test_agents.py::test_monitor_pdf_is_shown_inline_and_replaced PASSED [ 12%]
+tests/test_agents.py::test_reading_by_me_id_and_name_within_the_class PASSED [ 12%]
+tests/test_agents.py::test_shared_name_in_a_class_gets_409_with_ids PASSED [ 13%]
+tests/test_agents.py::test_reading_outputs_and_activity_with_filters PASSED [ 13%]
+tests/test_agents.py::test_file_outputs_can_be_downloaded_by_agents_in_the_class PASSED [ 14%]
+tests/test_agents.py::test_agents_delete_only_their_own_data PASSED      [ 14%]
+tests/test_agents.py::test_reads_never_include_commands_or_inbox PASSED  [ 15%]
+tests/test_agents.py::test_outputs_filter_pin_and_bell PASSED            [ 16%]
+tests/test_agents.py::test_an_agent_has_many_monitors_each_replaced_not_added PASSED [ 16%]
+tests/test_agents.py::test_monitors_have_the_same_filter_pins_and_bells_as_outputs PASSED [ 17%]
+tests/test_agents.py::test_owner_sets_and_removes_link_monitors_in_settings PASSED [ 17%]
+tests/test_agents.py::test_agents_read_monitors_of_their_class_only PASSED [ 18%]
+tests/test_agents.py::test_monitor_cap_per_agent PASSED                  [ 18%]
+tests/test_agents.py::test_older_connectors_single_monitor_still_works PASSED [ 19%]
+tests/test_agents.py::test_a_legacy_single_monitor_is_moved_into_the_monitor_table PASSED [ 19%]
+tests/test_agents.py::test_deleting_an_agent_deletes_its_monitors_and_their_files PASSED [ 20%]
+tests/test_agents.py::test_connector_holds_outputs_while_paused_and_sends_them_on_start PASSED [ 20%]
+tests/test_agents.py::test_connector_opts_in_to_messages_and_inbox PASSED [ 21%]
+tests/test_agents.py::test_each_agent_keeps_only_the_newest_outputs_and_activity PASSED [ 21%]
+tests/test_agents.py::test_connector_sets_named_monitors_and_buffers_only_the_newest_value_each PASSED [ 22%]
+tests/test_agents.py::test_filter_choices_are_remembered_per_member_agent_and_feed PASSED [ 22%]
+tests/test_agents.py::test_background_refreshes_without_the_filter_change_nothing PASSED [ 23%]
+tests/test_agents.py::test_a_non_owners_choices_are_not_a_preset_for_others PASSED [ 24%]
+tests/test_agents.py::test_connector_shares_reads_and_trees_skills PASSED [ 24%]
+tests/test_auth.py::test_gens_1_to_12_exist_before_anyone_registers PASSED [ 25%]
+tests/test_auth.py::test_register_page_lists_gens_newest_first PASSED    [ 25%]
+tests/test_auth.py::test_database_url_scheme_is_converted PASSED         [ 26%]
+tests/test_auth.py::test_add_missing_columns_adds_new_fields_with_their_defaults PASSED [ 26%]
+tests/test_auth.py::test_passwords_are_stored_as_salted_scrypt_hashes PASSED [ 27%]
+tests/test_auth.py::test_student_and_admin_register_with_their_own_keys PASSED [ 27%]
+tests/test_auth.py::test_wrong_or_missing_key_is_refused PASSED          [ 28%]
+tests/test_auth.py::test_unset_key_switches_registration_off PASSED      [ 28%]
+tests/test_auth.py::test_identical_keys_are_refused PASSED               [ 29%]
+tests/test_auth.py::test_student_must_choose_a_gen PASSED                [ 29%]
+tests/test_auth.py::test_login_id_rules_and_duplicates_in_any_case PASSED [ 30%]
+tests/test_auth.py::test_password_rules PASSED                           [ 31%]
+tests/test_auth.py::test_login_needs_no_key_and_uses_the_login_id PASSED [ 31%]
+tests/test_auth.py::test_login_failure_never_says_which_part_was_wrong PASSED [ 32%]
+tests/test_auth.py::test_signed_out_browser_goes_to_login_and_comes_back PASSED [ 32%]
+tests/test_auth.py::test_root_goes_to_classes_when_signed_in PASSED      [ 33%]
+tests/test_auth.py::test_pages_are_never_stored_by_browsers PASSED       [ 33%]
+tests/test_auth.py::test_cookie_is_httponly_and_lax PASSED               [ 34%]
+tests/test_auth.py::test_logout_ends_only_this_device PASSED             [ 34%]
+tests/test_auth.py::test_sign_out_all_devices PASSED                     [ 35%]
+tests/test_auth.py::test_expired_sign_in_no_longer_works PASSED          [ 35%]
+tests/test_auth.py::test_guest_visit_lasts_one_day PASSED                [ 36%]
+tests/test_auth.py::test_password_change_signs_other_devices_out PASSED  [ 36%]
+tests/test_auth.py::test_rate_limit_after_ten_failures PASSED            [ 37%]
+tests/test_auth.py::test_wrong_registration_keys_count_towards_the_rate_limit PASSED [ 37%]
+tests/test_auth.py::test_post_without_csrf_token_gets_403 PASSED         [ 38%]
+tests/test_auth.py::test_csrf_token_in_a_plain_form_field_works PASSED   [ 39%]
+tests/test_auth.py::test_account_page_is_for_members_only PASSED         [ 39%]
+tests/test_auth.py::test_other_names_are_limited_to_ten PASSED           [ 40%]
+tests/test_auth.py::test_full_database_gives_a_friendly_page_and_toast PASSED [ 40%]
+tests/test_auth.py::test_unexpected_errors_get_a_plain_message PASSED    [ 41%]
+tests/test_auth.py::test_agent_api_errors_are_503_so_the_connector_retries PASSED [ 41%]
+tests/test_auth.py::test_row_level_security_is_switched_on_for_owned_tables_only PASSED [ 42%]
+tests/test_auth.py::test_row_level_security_does_nothing_on_sqlite PASSED [ 42%]
+tests/test_auth.py::test_pages_and_stylesheets_are_compressed_and_cached PASSED [ 43%]
+tests/test_auth.py::test_downloads_are_not_compressed_again PASSED       [ 43%]
+tests/test_classes.py::test_class_visibility_for_every_kind_of_viewer PASSED [ 44%]
+tests/test_classes.py::test_gen_enrolment_includes_students_who_register_later PASSED [ 44%]
+tests/test_classes.py::test_hidden_class_looks_like_a_missing_one PASSED [ 45%]
+tests/test_classes.py::test_only_admins_create_edit_and_delete_classes PASSED [ 45%]
+tests/test_classes.py::test_class_form_checks_its_fields PASSED          [ 46%]
+tests/test_classes.py::test_automatic_label_when_there_is_no_title PASSED [ 47%]
+tests/test_classes.py::test_class_page_shows_info_tabs_and_enrolment_summary PASSED [ 47%]
+tests/test_classes.py::test_overlapping_classes_never_share_a_lane PASSED [ 48%]
+tests/test_classes.py::test_three_or_more_overlapping_classes_add_lanes PASSED [ 48%]
+tests/test_classes.py::test_non_overlapping_classes_reuse_lanes PASSED   [ 49%]
+tests/test_classes.py::test_timeline_boxes_never_overlap_at_any_zoom PASSED [ 49%]
+tests/test_classes.py::test_timeline_reaches_back_to_the_oldest_class_and_three_years_forward PASSED [ 50%]
+tests/test_classes.py::test_a_tick_on_every_friday_on_its_exact_date PASSED [ 50%]
+tests/test_classes.py::test_timeline_page_and_zoom PASSED                [ 51%]
+tests/test_classes.py::test_enrolled_and_ended_badges_on_the_timeline PASSED [ 51%]
+tests/test_classes.py::test_times_are_shown_in_jst PASSED                [ 52%]
+tests/test_classes.py::test_relative_times PASSED                        [ 52%]
+tests/test_classes.py::test_html_in_class_text_is_escaped PASSED         [ 53%]
+tests/test_classes.py::test_classes_have_the_tabs_ticked_at_creation PASSED [ 54%]
+tests/test_classes.py::test_switched_off_tabs_and_their_pages_are_not_found PASSED [ 54%]
+tests/test_classes.py::test_switching_a_tab_off_hides_its_data_and_on_brings_it_back PASSED [ 55%]
+tests/test_classes.py::test_the_class_form_has_the_tabs_ticked_by_default PASSED [ 55%]
+tests/test_classes.py::test_existing_classes_get_all_three_tabs PASSED   [ 56%]
+tests/test_classes.py::test_hidden_exam_submissions_dont_mark_the_class_as_new PASSED [ 56%]
+tests/test_coursework.py::test_only_admins_post_edit_and_delete_tasks PASSED [ 57%]
+tests/test_coursework.py::test_assignments_and_exams_are_kept_apart PASSED [ 57%]
+tests/test_coursework.py::test_task_needs_title_due_time_and_content PASSED [ 58%]
+tests/test_coursework.py::test_task_with_a_file_keeps_exactly_one_kind_of_content PASSED [ 58%]
+tests/test_coursework.py::test_due_indicator PASSED                      [ 59%]
+tests/test_coursework.py::test_bar_shows_the_latest_task_with_its_indicator PASSED [ 59%]
+tests/test_coursework.py::test_polling_answers_204_when_nothing_changed PASSED [ 60%]
+tests/test_coursework.py::test_enrolled_student_submits_and_it_appears_everywhere PASSED [ 60%]
+tests/test_coursework.py::test_only_enrolled_students_can_submit PASSED  [ 61%]
+tests/test_coursework.py::test_only_the_owner_edits_or_deletes_a_submission PASSED [ 62%]
+tests/test_coursework.py::test_admins_can_delete_any_submission PASSED   [ 62%]
+tests/test_coursework.py::test_link_only_to_a_task_of_the_same_class_and_kind PASSED [ 63%]
+tests/test_coursework.py::test_submission_without_a_task_is_fine PASSED  [ 63%]
+tests/test_coursework.py::test_submission_content_is_text_or_file PASSED [ 64%]
+tests/test_coursework.py::test_late_badge PASSED                         [ 64%]
+tests/test_coursework.py::test_dropdown_lists_five_recent_tasks_then_older PASSED [ 65%]
+tests/test_coursework.py::test_file_download_headers PASSED              [ 65%]
+tests/test_coursework.py::test_images_may_show_inline PASSED             [ 66%]
+tests/test_coursework.py::test_files_are_kept_in_file_storage_not_the_database PASSED [ 66%]
+tests/test_coursework.py::test_deleting_a_submission_deletes_its_file PASSED [ 67%]
+tests/test_coursework.py::test_file_size_limit PASSED                    [ 67%]
+tests/test_coursework.py::test_uploads_stop_when_storage_is_nearly_full PASSED [ 68%]
+tests/test_coursework.py::test_file_permissions PASSED                   [ 68%]
+tests/test_coursework.py::test_text_content_is_shown_as_plain_text PASSED [ 69%]
+tests/test_coursework.py::test_deleting_a_class_deletes_its_files PASSED [ 70%]
+tests/test_coursework.py::test_deleting_a_task_keeps_its_submissions PASSED [ 70%]
+tests/test_coursework.py::test_due_time_is_entered_and_shown_in_jst PASSED [ 71%]
+tests/test_coursework.py::test_new_submission_marks_the_class_until_its_page_is_opened PASSED [ 71%]
+tests/test_coursework.py::test_new_members_only_see_marks_for_submissions_after_they_registered PASSED [ 72%]
+tests/test_coursework.py::test_guests_get_no_notification_marks PASSED   [ 72%]
+tests/test_coursework.py::test_supabase_keys_are_sent_the_way_each_kind_needs PASSED [ 73%]
+tests/test_coursework.py::test_files_go_to_supabase_storage_and_back PASSED [ 73%]
+tests/test_coursework.py::test_supabase_refusals_are_explained PASSED    [ 74%]
+tests/test_coursework.py::test_storage_check_warns_about_render_without_supabase PASSED [ 74%]
+tests/test_coursework.py::test_a_missing_file_gives_a_clear_message PASSED [ 75%]
+tests/test_coursework.py::test_pdfs_html_and_text_can_be_previewed PASSED [ 75%]
+tests/test_coursework.py::test_a_fake_pdf_is_not_previewed PASSED        [ 76%]
+tests/test_coursework.py::test_previews_follow_download_permissions PASSED [ 77%]
+tests/test_guests.py::test_placeholders_are_fixed_and_never_reused PASSED [ 77%]
+tests/test_guests.py::test_name_search_catches_parts_case_widths_and_other_names PASSED [ 78%]
+tests/test_guests.py::test_members_always_see_the_original_text PASSED   [ 78%]
+tests/test_guests.py::test_guests_never_see_a_real_name_or_login_id_anywhere PASSED [ 79%]
+tests/test_guests.py::test_unticked_items_do_not_exist_for_guests PASSED [ 79%]
+tests/test_guests.py::test_ticked_submissions_are_shown_in_full PASSED   [ 80%]
+tests/test_guests.py::test_ticked_submission_linked_to_a_hidden_task_shows_no_link PASSED [ 80%]
+tests/test_guests.py::test_class_hidden_from_guests_hides_everything_in_it PASSED [ 81%]
+tests/test_guests.py::test_guest_cell_shows_the_latest_guest_visible_submission PASSED [ 81%]
+tests/test_guests.py::test_visible_to_guests_checkbox_warns_about_files PASSED [ 82%]
+tests/test_guests.py::test_guests_are_refused_on_every_upload_edit_and_control_route PASSED [ 82%]
+tests/test_guests.py::test_guests_never_see_the_members_page_or_login_ids PASSED [ 83%]
+tests/test_members.py::test_members_page_groups_accounts_and_shows_storage PASSED [ 83%]
+tests/test_members.py::test_admin_changes_name_and_gen PASSED            [ 84%]
+tests/test_members.py::test_reset_password_shows_it_once_and_signs_the_member_out PASSED [ 85%]
+tests/test_members.py::test_delete_account_needs_the_admin_password_and_removes_their_data PASSED [ 85%]
+tests/test_members.py::test_admins_cannot_delete_themselves PASSED       [ 86%]
+tests/test_members.py::test_add_the_next_gen PASSED                      [ 86%]
+tests/test_members.py::test_folders_belong_to_their_student_and_are_shared_across_classes PASSED [ 87%]
+tests/test_members.py::test_grid_pages_hold_nine_cells_including_add_agent PASSED [ 87%]
+tests/test_members.py::test_members_page_shows_the_database_size PASSED  [ 88%]
+tests/test_members.py::test_file_storage_breakdown_by_type_class_person_agent_and_largest PASSED [ 88%]
+tests/test_members.py::test_pie_gives_six_colours_then_other PASSED      [ 89%]
+tests/test_members.py::test_database_breakdown_estimates_by_class_person_and_agent PASSED [ 89%]
+tests/test_members.py::test_breakdowns_are_for_admins_only PASSED        [ 90%]
+tests/test_skills.py::test_a_member_shares_a_skill_and_it_appears_with_its_identifier PASSED [ 90%]
+tests/test_skills.py::test_sharing_again_with_the_same_name_updates_it PASSED [ 91%]
+tests/test_skills.py::test_skill_files_are_checked PASSED                [ 91%]
+tests/test_skills.py::test_downloading_counts PASSED                     [ 92%]
+tests/test_skills.py::test_class_only_and_seminar_wide_skills PASSED     [ 93%]
+tests/test_skills.py::test_the_market_is_for_members_only PASSED         [ 93%]
+tests/test_skills.py::test_only_its_member_edits_and_admins_can_remove PASSED [ 94%]
+tests/test_skills.py::test_filters_search_source_and_mine PASSED         [ 94%]
+tests/test_skills.py::test_agents_post_read_update_and_download_skills PASSED [ 95%]
+tests/test_skills.py::test_agents_only_delete_their_own_skills PASSED    [ 95%]
+tests/test_skills.py::test_agents_see_skills_as_their_owner_does PASSED  [ 96%]
+tests/test_skills.py::test_skill_trees PASSED                            [ 96%]
+tests/test_skills.py::test_deleting_an_agent_keeps_its_skills_credited PASSED [ 97%]
+tests/test_skills.py::test_keyword_rules_sort_skills_by_function PASSED  [ 97%]
+tests/test_skills.py::test_the_ai_organizer_uses_one_request_and_applies_its_answer PASSED [ 98%]
+tests/test_skills.py::test_a_bad_ai_answer_changes_nothing_and_the_daily_limit_holds PASSED [ 98%]
+tests/test_skills.py::test_the_schedule_always_runs_at_3pm_and_once_more_only_if_needed PASSED [ 99%]
+tests/test_skills.py::test_the_daily_timer_needs_its_token PASSED        [100%]
+============================= 187 passed in 39.23s =============================
 ```
 
 ## 3. Manual end-to-end check (Instructions step 7)
@@ -403,6 +460,7 @@ Result: 24 of 24 checks passed. The pages were also looked at in a browser (time
 
 - **Render and Supabase were not used.** Deploying (Render Blueprint, Supabase Postgres via the Session pooler, the private `seminar-files` bucket) can only be done by the user. The Supabase Storage calls in `storage.py` (upload `POST /storage/v1/object/{bucket}/{path}`, download `GET` on the same path, delete `DELETE /storage/v1/object/{bucket}` with `prefixes`) follow Supabase's Storage REST API but were never run against a real project. The tests check them against a stand-in server that follows Supabase's documented API (including sending `sb_secret_` keys only in the `apikey` header); whether the real service agrees can only be seen on the deployed site, where the Members page now shows a live connection check. Postgres was likewise not tested (only SQLite); `add_missing_columns()` was tested on SQLite.
 - **The database breakdown "By table" was only exercised through its fallback**: this Mac's SQLite can't measure tables, so the exact per-table sizes (Postgres's `pg_total_relation_size`) will first be seen on Supabase. The pie charts were checked by eye in one browser.
+- **Not tested against the real services:** the AI organizer was never run against OpenRouter (on purpose: the free key allows very few requests a day); its request and reply handling are tested with a stand-in. Row level security was tested with a stand-in Postgres connection only; Supabase's own Security advisor will confirm it after deploying. The GitHub timer can only run once the repository has its two secrets.
 - **Browser-only behaviour is not covered by the automated tests**: drag-to-pan, centring the timeline, zoom keeping the centre date, the background grid's rush, the typing title and other animations, and HTMX/Alpine interactions. They were checked by eye in one desktop browser and at phone width, not across browsers or on a real touch device.
 - **Rate limiting is in memory**, per address taken from the first `X-Forwarded-For` entry. It resets when the site restarts, and is only correct while the site runs as a single instance (as on Render's free plan). A client can put a fake first address in `X-Forwarded-For`, so the limit slows guessing rather than making it impossible.
 - **The name search cannot read inside files**, and it only knows names written as full name, name parts of 2+ characters, or listed "other names". A name written some other way (for example an unlisted spelling, or half-width katakana with separate voicing marks) is not caught.

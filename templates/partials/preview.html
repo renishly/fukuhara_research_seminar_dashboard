@@ -1,0 +1,25 @@
+{# "Preview": shows a PDF, HTML or text file inside the page, on request (so
+   pages with many files don't load them all). HTML and text come from the
+   server with a sandboxing Content Security Policy (uploads.SANDBOX_POLICY):
+   the browser treats them as another site and runs no scripts, so nothing in
+   them can reach this site. (The frame itself isn't marked sandbox="": some
+   embedded browsers refuse to show such frames at all, and the server's
+   policy already gives the same protection.) Only real PDFs are shown.
+   @click.stop keeps the button from also opening an agent card it sits on. #}
+{% macro button(f) %}
+  {% set kind = preview_kind(f) %}
+  {% if kind %}
+  <div x-data="{ open: false }" class="space-y-2">
+    <button type="button" class="btn btn-xs" @click.stop="open = !open" x-text="open ? 'Hide preview' : 'Preview'">Preview</button>
+    <template x-if="open">
+      {% if kind == "pdf" %}
+      <iframe src="/files/{{ f.id }}/preview#view=FitH" title="{{ f.filename }}"
+              class="h-[70vh] min-h-96 w-full border border-base-content/40 bg-white"></iframe>
+      {% else %}
+      <iframe src="/files/{{ f.id }}/preview" title="{{ f.filename }}"
+              class="{{ 'h-[70vh]' if kind == 'html' else 'h-96' }} w-full border border-base-content/40 bg-white"></iframe>
+      {% endif %}
+    </template>
+  </div>
+  {% endif %}
+{% endmacro %}

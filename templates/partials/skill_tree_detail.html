@@ -1,0 +1,17 @@
+{% extends "partials/modal.html" %}
+{% block size %}max-w-3xl{% endblock %}
+{% block body %}
+<div class="space-y-3" x-data="{ deleting: false }">
+  <h3 class="text-lg font-bold">Skill tree of {{ agent.name if agent else "a deleted agent" }}</h3>
+  <p class="text-xs text-base-content/70">{{ owner.full_name if owner else "" }} &middot; version {{ tree.version }} &middot; updated {{ tree.updated_at | jst }}</p>
+  <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ tree.content }}</pre>
+  <div class="modal-action">
+    {% if can_delete %}
+    <button type="button" class="btn btn-error btn-outline btn-sm mr-auto" x-show="!deleting" @click="deleting = true">Remove</button>
+    <span x-show="deleting" x-cloak class="mr-auto flex items-center gap-2 text-sm">Remove this skill tree?
+      <button type="button" class="btn btn-error btn-sm" hx-post="/skill-trees/{{ tree.agent_id }}/delete">Remove</button></span>
+    {% endif %}
+    <button type="button" class="btn" @click="$el.closest('.modal').remove()">Close</button>
+  </div>
+</div>
+{% endblock %}

@@ -16,6 +16,8 @@ from db import (
     LoginSession,
     MonitorNotifySetting,
     NotifySetting,
+    Skill,
+    SkillTree,
     StoredFile,
     Submission,
     Task,
@@ -161,8 +163,10 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
     name = user.full_name
     for submission in db.exec(select(Submission).where(Submission.student_id == user.id)).all():
         delete_submission(db, submission)
+    db.exec(delete(Skill).where(Skill.owner_id == user.id))
     for agent in db.exec(select(Agent).where(Agent.owner_id == user.id)).all():
         delete_agent(db, agent)
+    db.exec(delete(SkillTree).where(SkillTree.owner_id == user.id))
     for model, column in ((Folder, Folder.owner_id), (NotifySetting, NotifySetting.user_id),
                           (MonitorNotifySetting, MonitorNotifySetting.user_id),
                           (FeedFilter, FeedFilter.user_id),

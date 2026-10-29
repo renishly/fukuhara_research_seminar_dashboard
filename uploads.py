@@ -15,7 +15,7 @@ from sqlmodel import Session, func, select
 
 import storage
 from db import InboxFile, StoredFile
-from web import human_size
+from web import human_size, templates
 
 MB = 1024 * 1024
 COURSEWORK_FILE_LIMIT = 50 * MB  # assignment, exam and submission files
@@ -28,6 +28,39 @@ STORAGE_TOTAL_LIMIT = 900 * MB  # Supabase's free plan has 1 GB; keep some room
 # HTML and PDF from members, which could run scripts or fake a page) is
 # download-only.
 INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+# Files that can be previewed inside the page (besides images, shown directly):
+# PDFs in the browser's PDF viewer, and HTML and plain text in a fully
+# sandboxed frame (see preview_response()).
+TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".log", ".py", ".yaml", ".yml"}
+HTML_EXTENSIONS = {".html", ".htm"}
+PREVIEW_LIMIT = 20 * MB  # bigger files are only offered as downloads
+
+# The rules for showing an HTML or text file from a member: "sandbox" makes the
+# browser treat it as coming from a separate, unknown site (so it can't see
+# anyone's sign-in or use this site), and scripts, forms and pop-ups are off.
+# Only styles, pictures and fonts written inside the file itself are allowed.
+SANDBOX_POLICY = ("sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; "
+                  "frame-ancestors 'self'")
+
+
+def preview_kind(stored: StoredFile | None) -> str | None:
+    """How a file can be previewed in the page: "pdf", "html", "text", or None."""
+    if stored is None or stored.size > PREVIEW_LIMIT:
+        return None
+    name = stored.filename.lower()
+    extension = name[name.rfind("."):] if "." in name else ""
+    if stored.content_type == "application/pdf" or extension == ".pdf":
+        return "pdf"
+    if stored.content_type == "text/html" or extension in HTML_EXTENSIONS:
+        return "html"
+    if stored.content_type.startswith("text/") or extension in TEXT_EXTENSIONS:
+        return "text"
+    return None
+
+
+templates.env.globals["preview_kind"] = preview_kind
 
 
 class UploadRefused(Exception):
@@ -149,3 +182,32 @@ def file_response(stored: StoredFile, inline: bool | None = None, filename: str 
             "Cache-Control": cache,
         },
     )
+
+
+def preview_response(stored: StoredFile) -> StreamingResponse:
+    """Send a file to be shown inside the page (the caller checks permissions).
+
+    - PDF: only if it really is one (it starts with "%PDF-"), in the browser's
+      own PDF viewer.
+    - HTML and text: under SANDBOX_POLICY, so nothing in the file can run or
+      reach this site; text is shown as plain text, never as HTML.
+    """
+    kind = preview_kind(stored)
+    if kind is None:
+        raise HTTPException(404, "This file can't be previewed; download it instead.")
+    pieces = _pieces(stored)
+    first = next(pieces, b"")
+    if kind == "pdf" and not first.startswith(b"%PDF-"):
+        raise HTTPException(404, "This file isn't a real PDF, so it can't be previewed; download it instead.")
+
+    def stream():
+        yield first
+        yield from pieces
+
+    headers = {"Content-Disposition": f"inline; filename*=UTF-8''{quote(stored.filename)}",
+               "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"}
+    if kind == "pdf":
+        return StreamingResponse(stream(), media_type="application/pdf", headers=headers)
+    headers["Content-Security-Policy"] = SANDBOX_POLICY
+    media_type = "text/html; charset=utf-8" if kind == "html" else "text/plain; charset=utf-8"
+    return StreamingResponse(stream(), media_type=media_type, headers=headers)

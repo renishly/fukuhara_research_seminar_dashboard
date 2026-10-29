@@ -46,10 +46,8 @@ from routes.agent_tools import (
     count_outputs,
     file_details,
     folders_of,
-    get_monitor,
+    grid_details,
     is_online,
-    latest_event,
-    latest_output,
     log_activity,
     monitor_names,
     output_categories,
@@ -190,18 +188,14 @@ def grid_context(db: Session, viewer: Viewer, course: Course, owner: User, page:
         .order_by(func.lower(Agent.name), Agent.name).offset(first).limit(CELLS_PER_PAGE)
     ).all()
     cells = []
+    # Guests only see names, status and descriptions, so they need no details.
+    details = grid_details(db, list(agents)) if viewer.is_member else {}
     for agent in agents:
         cell = {"agent": agent, "online": is_online(agent)}
-        if viewer.is_member:  # guests only see names, status and descriptions
-            cell["latest"] = latest_event(db, agent.id)
-            cell["folders"] = folders_of(db, agent.id)
+        if viewer.is_member:
             # The pinned item: the newest output of the pinned category, or the pinned monitor.
-            if agent.pinned_category:
-                cell["pinned"] = latest_output(db, agent.id, agent.pinned_category)
-                cell["pinned_label"] = agent.pinned_category
-            elif agent.pinned_monitor_name:
-                cell["pinned"] = get_monitor(db, agent.id, agent.pinned_monitor_name)
-                cell["pinned_label"] = agent.pinned_monitor_name
+            cell |= details[agent.id]
+            cell["pinned_label"] = agent.pinned_category or agent.pinned_monitor_name
         cells.append(cell)
     pinned_files = file_details(db, [c["pinned"].file_id for c in cells if c.get("pinned") and c["pinned"].file_id])
     return {
@@ -265,7 +259,7 @@ def agent_grid_page(request: Request, course_id: int, student_id: int, page: int
 def agent_grid_fragment(course_id: int, student_id: int, page: int = 1, folder: int | None = None,
                         seen: str | None = None, viewer: Viewer = Depends(current_viewer),
                         db: Session = Depends(get_session)):
-    """The grid again, every 5 seconds (204 if nothing changed)."""
+    """The grid again, every 15 seconds (204 if nothing changed)."""
     course = get_course(db, viewer, course_id)
     owner = dashboard_owner(db, viewer, course, student_id)
     current = folder_for_grid(db, owner, folder) if viewer.is_member else None
@@ -677,7 +671,7 @@ def set_monitor_link(agent_id: int, name: str = Form(""), url: str = Form(""),
 @router.get("/agents/{agent_id}/events")
 def agent_events(agent_id: int, seen: str | None = None, viewer: Viewer = Depends(require_member),
                  db: Session = Depends(get_session)):
-    """The 50 newest Activity lines (every 3 seconds; 204 if nothing changed)."""
+    """The 50 newest Activity lines (every 10 seconds; 204 if nothing changed)."""
     agent = viewable_agent(db, viewer, agent_id)
     events = db.exec(select(Event).where(Event.agent_id == agent.id)
                      .order_by(Event.created_at.desc(), Event.id.desc()).limit(50)).all()
@@ -719,7 +713,7 @@ def agent_command(agent_id: int, command: str = Form(...), text: str | None = Fo
 def messages_ready(agent_id: int, ready: bool, viewer: Viewer = Depends(require_member),
                    db: Session = Depends(get_session)):
     """Has the agent started or stopped accepting messages (or its Inbox) since
-    the page loaded? Asked every 5 seconds: 204 if not, otherwise the page reloads."""
+    the page loaded? Asked every 15 seconds: 204 if not, otherwise the page reloads."""
     agent = viewable_agent(db, viewer, agent_id)
     if agent.accepts_messages == ready:
         return Response(status_code=204)
