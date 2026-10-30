@@ -15,6 +15,7 @@ from db import Agent, Course, Skill, SkillCategory, SkillTree, User, get_session
 from routes.agents import site_url
 from routes.common import get_course, not_found
 from security import Viewer, checked_admin, checked_member, forbidden, require_member, secret_matches
+from uploads import chosen_files
 from web import hx_redirect, render, toast
 
 router = APIRouter()
@@ -38,6 +39,9 @@ def get_skill(db: Session, viewer: Viewer, skill_id: int) -> Skill:
 def my_agents(db: Session, viewer: Viewer, course: Course) -> list[Agent]:
     return list(db.exec(select(Agent).where(Agent.owner_id == viewer.id, Agent.course_id == course.id)
                         .order_by(Agent.name)).all())
+
+
+MAX_SKILL_FILES = 20  # skill files shared in one go
 
 
 async def read_text_input(mode: str, content_text: str, file: UploadFile | None) -> str:
@@ -116,19 +120,33 @@ def new_skill_form(request: Request, course_id: int, viewer: Viewer = Depends(re
 @router.post("/classes/{course_id}/skills")
 async def upload_skill(request: Request, course_id: int, name: str = Form(""), summary: str = Form(""),
                        share: str = Form("class"), mode: str = Form("file"), content_text: str = Form(""),
-                       file: UploadFile | None = File(None), viewer: Viewer = Depends(checked_member),
+                       files: list[UploadFile] | None = File(None), viewer: Viewer = Depends(checked_member),
                        db: Session = Depends(get_session)):
-    """A member shares a skill directly (credited to them). Uploading a skill
-    with the same name again updates it (same identifier, next version)."""
+    """A member shares skills directly (credited to them): typed, or one or
+    more files, each becoming its own skill (several files: each is named
+    after its first heading). Uploading a skill with the same name again
+    updates it (same identifier, next version)."""
     course = market_course(db, viewer, course_id)
     values = {"name": name, "summary": summary, "share": share, "mode": mode, "content_text": content_text}
+    chosen = chosen_files(files) if mode == "file" else []
     try:
-        content = await read_text_input(mode, content_text, file)
+        if len(chosen) > MAX_SKILL_FILES:
+            raise market.SkillRefused(f"Share at most {MAX_SKILL_FILES} skill files at once.")
+        # Read and check every file first, so either all are shared or none.
+        contents = []
+        for file in chosen or [None]:
+            try:
+                contents.append(await read_text_input(mode, content_text, file))
+            except market.SkillRefused as refusal:
+                raise market.SkillRefused(f"{file.filename}: {refusal}" if len(chosen) > 1 else str(refusal))
     except market.SkillRefused as refusal:
         return skill_form(request, db, viewer, course, values=values, error=str(refusal), status_code=400)
-    skill, _ = market.save_skill(db, course=course, owner=viewer.user, content=content, name=name, summary=summary,
-                                 share=share)
-    return hx_redirect(f"/classes/{course.id}?tab=agents&skill={skill.id}")
+    skills = [market.save_skill(db, course=course, owner=viewer.user, content=content,
+                                name=name if len(contents) == 1 else None, summary=summary, share=share)[0]
+              for content in contents]
+    if len({skill.id for skill in skills}) == 1:
+        return hx_redirect(f"/classes/{course.id}?tab=agents&skill={skills[0].id}")
+    return hx_redirect(f"/classes/{course.id}?tab=agents")
 
 
 @router.get("/skills/{skill_id}/edit")
@@ -142,9 +160,11 @@ def edit_skill_form(request: Request, skill_id: int, viewer: Viewer = Depends(re
 
 @router.post("/skills/{skill_id}/edit")
 async def edit_skill(request: Request, skill_id: int, summary: str = Form(""), share: str = Form("class"),
-                     mode: str = Form("file"), content_text: str = Form(""), file: UploadFile | None = File(None),
+                     mode: str = Form("file"), content_text: str = Form(""),
+                     files: list[UploadFile] | None = File(None),
                      viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
     """Change a skill's description and sharing, and (optionally) replace its text."""
+    file = next(iter(chosen_files(files)), None)
     skill = get_skill(db, viewer, skill_id)
     if not market.can_change_skill(viewer, skill):
         raise forbidden("Only the member a skill is credited to can change it.")

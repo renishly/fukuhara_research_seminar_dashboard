@@ -389,6 +389,60 @@ code.block {
   background: var(--sky);
 }
 
+/* --- Drop zones (templates/partials/dropzone.html, static/ui.js) --------------- */
+
+/* A large dashed area for choosing files: drop them on it, or click it. It
+   turns cobalt while files are dragged over it. */
+.dropzone {
+  display: block;
+  cursor: pointer;
+  padding: 1rem;
+  border: 1.5px dashed var(--ink);
+  background: rgb(255 255 255 / 0.55);
+  text-align: center;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.dropzone:hover,
+.dropzone:focus-within {
+  background: rgb(255 255 255 / 0.85);
+}
+.dropzone.dragging {
+  border-color: var(--cobalt);
+  border-style: solid;
+  background: rgb(47 91 255 / 0.12);
+}
+fieldset:disabled .dropzone {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.dropzone-prompt {
+  font-size: 0.875rem;
+}
+.dropzone-list {
+  margin-top: 0.5rem;
+  text-align: left;
+  font-size: 0.8125rem;
+}
+.dropzone-list:empty {
+  display: none;
+}
+.dropzone-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  border-top: 1px solid rgb(11 31 58 / 0.15);
+}
+.dropzone-list .name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dropzone-list .size {
+  color: rgb(11 31 58 / 0.6);
+  white-space: nowrap;
+}
+
 /* --- The student window --------------------------------------------------------- */
 
 /* The window is a fixed-size viewport onto a 2D plane: the cells sit in the

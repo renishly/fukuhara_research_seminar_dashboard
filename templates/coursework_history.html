@@ -33,7 +33,7 @@
       <p class="text-sm">Due <strong>{{ task.due_at | jst }}</strong> &middot; {{ task.due_at | relative }}
         {% if viewer.is_member and not task.guest_visible %}<span class="badge badge-outline badge-xs ml-1">not visible to guests</span>{% endif %}</p>
       {% if task.description %}<p class="whitespace-pre-line break-words">{{ mask(task.description) }}</p>{% endif %}
-      {{ content.show(task, files, mask) }}
+      {{ content.show(task, files["tasks"].get(task.id, []), mask) }}
 
       <section class="space-y-2 border-t border-base-content/30 pt-3">
         <h3 class="section-title text-sm font-semibold">Submissions ({{ entry.submissions | length }})</h3>
@@ -51,7 +51,7 @@
                     hx-confirm="Delete this submission and its file? (Moderation: this can't be undone.)">Delete</button>
             {% endif %}
           </div>
-          {{ content.show(s, files, mask) }}
+          {{ content.show(s, files["submissions"].get(s.id, []), mask) }}
         </div>
         {% else %}
         <p class="text-sm text-base-content/60">No submissions linked yet.</p>

@@ -16,6 +16,7 @@ from sqlmodel import Session, delete, select
 from db import (
     Agent,
     AgentFolder,
+    Attachment,
     ClassVisit,
     Command,
     Course,
@@ -33,6 +34,7 @@ from db import (
     Output,
     Skill,
     SkillTree,
+    StoredFile,
     Submission,
     Task,
     User,
@@ -141,8 +143,44 @@ def student_groups(db: Session, viewer: Viewer, course: Course) -> list[GenGroup
 # ---------------------------------------------------------------------------
 
 
+def attachments_of(db: Session, item: Task | Submission) -> list[Attachment]:
+    """An assignment's, exam's or submission's files (Attachment rows), in order."""
+    column = Attachment.submission_id if isinstance(item, Submission) else Attachment.task_id
+    return list(db.exec(select(Attachment).where(column == item.id).order_by(Attachment.position, Attachment.id)).all())
+
+
+def attached_files(db: Session, tasks: list[Task], submissions: list[Submission]) -> dict[str, dict[int, list[StoredFile]]]:
+    """The files of these tasks and submissions, in one lookup:
+    {"tasks": {task id: [files]}, "submissions": {submission id: [files]}}."""
+    found = {"tasks": {}, "submissions": {}}
+    task_ids, submission_ids = [t.id for t in tasks], [s.id for s in submissions]
+    if not task_ids and not submission_ids:
+        return found
+    rows = db.exec(
+        select(Attachment, StoredFile).join(StoredFile, StoredFile.id == Attachment.file_id)
+        .where(Attachment.task_id.in_(task_ids or [-1]) | Attachment.submission_id.in_(submission_ids or [-1]))
+        .order_by(Attachment.position, Attachment.id)
+    ).all()
+    for attachment, stored in rows:
+        if attachment.task_id is not None:
+            found["tasks"].setdefault(attachment.task_id, []).append(stored)
+        else:
+            found["submissions"].setdefault(attachment.submission_id, []).append(stored)
+    return found
+
+
+def detach_files(db: Session, attachments: list[Attachment]) -> None:
+    """Remove these Attachment rows with their files (in storage too)."""
+    for attachment in attachments:
+        file_id = attachment.file_id
+        db.delete(attachment)
+        db.flush()
+        delete_stored_file(db, file_id)
+
+
 def delete_submission(db: Session, submission: Submission) -> None:
-    file_id = submission.file_id
+    detach_files(db, attachments_of(db, submission))
+    file_id = submission.file_id  # legacy
     db.delete(submission)
     db.flush()
     delete_stored_file(db, file_id)
@@ -153,7 +191,8 @@ def delete_task(db: Session, task: Task) -> None:
     for submission in db.exec(select(Submission).where(Submission.task_id == task.id)).all():
         submission.task_id = None
         db.add(submission)
-    file_id = task.file_id
+    detach_files(db, attachments_of(db, task))
+    file_id = task.file_id  # legacy
     db.delete(task)
     db.flush()
     delete_stored_file(db, file_id)

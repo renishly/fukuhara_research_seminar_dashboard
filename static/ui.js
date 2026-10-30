@@ -4,6 +4,7 @@
 //   2. Centring: scrolls the timeline to today (or to the date kept when
 //      zooming), and gives the zoom buttons that date.
 //   3. The background grid's "rush" on each page load.
+//   4. Drop zones: dropping files onto upload fields.
 // If anything here fails, the page still works: scroll bars and the scroll
 // wheel always move the timeline and windows too.
 
@@ -176,4 +177,114 @@ document.addEventListener("click", (event) => {
     else drift.play();
   };
   requestAnimationFrame(step);
+})();
+
+// ---------------------------------------------------------------------------
+// 4. Drop zones (templates/partials/dropzone.html). Files dropped on a
+// [data-dropzone] go into its file input (added to the ones already chosen,
+// or replacing it for single-file fields), and the chosen files are listed,
+// each with a button to take it out. Files dropped anywhere else are ignored,
+// so a near miss doesn't open the file in the browser and lose the form.
+// Uses event delegation, so pop-ups loaded later by HTMX work too.
+// ---------------------------------------------------------------------------
+(() => {
+  const hasFiles = (event) => event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
+  const zoneOf = (target) => target instanceof Element ? target.closest("[data-dropzone]") : null;
+  const usable = (zone) => zone && !zone.querySelector("input[type=file]").disabled;
+
+  function humanSize(bytes) {
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes, unit = 0;
+    while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+    return `${unit ? size.toFixed(1) : size} ${units[unit]}`;
+  }
+
+  function setFiles(input, files) {
+    const transfer = new DataTransfer();
+    files.forEach((file) => transfer.items.add(file));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function showList(zone) {
+    const input = zone.querySelector("input[type=file]");
+    const list = zone.querySelector("[data-dropzone-list]");
+    list.replaceChildren(...Array.from(input.files).map((file, index) => {
+      const item = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = file.name;
+      const size = document.createElement("span");
+      size.className = "size";
+      size.textContent = humanSize(file.size);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn btn-ghost btn-xs";
+      remove.textContent = "\u00d7";
+      remove.setAttribute("aria-label", `Remove ${file.name}`);
+      remove.dataset.dropzoneRemove = index;
+      item.append(name, size, remove);
+      return item;
+    }));
+  }
+
+  let over = null; // the zone files are being dragged over
+  const highlight = (zone) => {
+    if (over === zone) return;
+    if (over) over.classList.remove("dragging");
+    over = zone;
+    if (over) over.classList.add("dragging");
+  };
+
+  document.addEventListener("dragover", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault(); // never let the browser open a dropped file
+    const zone = zoneOf(event.target);
+    event.dataTransfer.dropEffect = usable(zone) ? "copy" : "none";
+    highlight(usable(zone) ? zone : null);
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget || !zoneOf(event.relatedTarget)) highlight(null);
+  });
+  document.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    highlight(null);
+    const zone = zoneOf(event.target);
+    if (!usable(zone)) return;
+    const input = zone.querySelector("input[type=file]");
+    const dropped = Array.from(event.dataTransfer.files);
+    setFiles(input, input.multiple ? [...Array.from(input.files), ...dropped] : dropped.slice(0, 1));
+  });
+
+  // Choosing with the file chooser adds to the files already chosen too
+  // (browsers would replace them): remember them when the chooser opens.
+  document.addEventListener("change", (event) => {
+    const zone = zoneOf(event.target);
+    if (!zone || event.target.type !== "file") return;
+    const input = event.target;
+    if (event.isTrusted && input.multiple && zone.keptFiles && zone.keptFiles.length) {
+      const kept = zone.keptFiles;
+      zone.keptFiles = null;
+      setFiles(input, [...kept, ...Array.from(input.files)]); // comes back here, untrusted
+      return;
+    }
+    showList(zone);
+  });
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element && event.target.closest("[data-dropzone-remove]");
+    if (!button) {
+      const zone = zoneOf(event.target);
+      if (zone) zone.keptFiles = Array.from(zone.querySelector("input[type=file]").files);
+      return;
+    }
+    event.preventDefault(); // don't open the file chooser
+    const input = zoneOf(button).querySelector("input[type=file]");
+    const keep = Array.from(input.files).filter((_, index) => index !== Number(button.dataset.dropzoneRemove));
+    setFiles(input, keep);
+  });
+  // A form reset (e.g. after an Inbox upload) empties the inputs: empty the lists too.
+  document.addEventListener("reset", (event) => {
+    setTimeout(() => event.target.querySelectorAll("[data-dropzone]").forEach(showList), 0);
+  });
 })();

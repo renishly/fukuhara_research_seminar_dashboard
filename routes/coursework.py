@@ -8,7 +8,7 @@ The Assignments and Exams tabs work the same way; `kind` says which one
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from sqlmodel import Session, select
 
-from db import StoredFile, Submission, Task, User, get_session, utc_now
+from db import Attachment, StoredFile, Submission, Task, User, get_session, utc_now
 from permissions import (
     can_delete_submission,
     can_download_file,
@@ -19,8 +19,11 @@ from permissions import (
     student_is_enrolled,
 )
 from routes.common import (
+    attached_files,
+    attachments_of,
     delete_submission,
     delete_task,
+    detach_files,
     get_course,
     kind_of,
     not_found,
@@ -32,12 +35,12 @@ from routes.common import (
 from security import Viewer, checked_admin, checked_member, current_viewer, forbidden, require_admin, require_member
 from uploads import (
     COURSEWORK_FILE_LIMIT,
+    MAX_FILES_PER_ITEM,
     UploadRefused,
-    delete_stored_file,
+    chosen_files,
     file_response,
-    has_file,
     preview_response,
-    save_upload,
+    save_uploads,
 )
 from web import clean_line, clean_text, hx_redirect, jst_input_value, parse_jst_input, render
 
@@ -68,14 +71,47 @@ def history_page(request: Request, course_id: int, kinds: str, viewer: Viewer = 
         entries.append({"task": task, "submissions": linked})
     return render(request, db, viewer, "coursework_history.html", course=course, kind=kind, kinds=kinds,
                   entries=entries, students=students, labels={u.id: student_label(db, u) for u in students.values()},
-                  files=_files_for(db, tasks, submissions), can_manage=can_manage_classes(viewer))
+                  files=attached_files(db, tasks, submissions), can_manage=can_manage_classes(viewer))
 
 
-def _files_for(db: Session, tasks: list[Task], submissions: list[Submission]) -> dict[int, StoredFile]:
-    ids = [item.file_id for item in [*tasks, *submissions] if item.file_id]
-    if not ids:
-        return {}
-    return {f.id: f for f in db.exec(select(StoredFile).where(StoredFile.id.in_(ids))).all()}
+def current_files(db: Session, item: Task | Submission | None) -> list[StoredFile]:
+    """An item's files, for the "Attached now" list of its edit form."""
+    if item is None or item.id is None:
+        return []
+    return [db.get(StoredFile, a.file_id) for a in attachments_of(db, item)]
+
+
+def apply_content(db: Session, item: Task | Submission, mode: str, text: str, files, remove_files: list[int],
+                  uploaded_by: int) -> list[int]:
+    """Set an item's content to text, or to its files: the ones it has, minus
+    remove_files, plus the new ones. Returns the ids of files to delete once
+    the item is saved. Raises UploadRefused (with a message for the form)."""
+    new = chosen_files(files)
+    attached = attachments_of(db, item) if item.id else []
+    if mode == "text":
+        if not text:
+            raise UploadRefused("Write the content, or switch to files.")
+        item.content_text = text
+        return [a.file_id for a in attached]
+    kept = [a for a in attached if a.file_id not in set(remove_files)]
+    if not kept and not new:
+        raise UploadRefused("Choose at least one file, or switch to text.")
+    if len(kept) + len(new) > MAX_FILES_PER_ITEM:
+        raise UploadRefused(f"There can be at most {MAX_FILES_PER_ITEM} files.")
+    stored = save_uploads(db, new, COURSEWORK_FILE_LIMIT, uploaded_by)
+    item.content_text = None
+    db.add(item)
+    db.flush()  # gives a new item its id
+    key = "submission_id" if isinstance(item, Submission) else "task_id"
+    start = max((a.position for a in attached), default=-1) + 1
+    for offset, saved in enumerate(stored):
+        db.add(Attachment(file_id=saved.id, position=start + offset, **{key: item.id}))
+    return [a.file_id for a in attached if a not in kept]
+
+
+def remove_files_of(db: Session, file_ids: list[int]) -> None:
+    """Delete these files of an item (their Attachment rows and stored bytes). The caller commits."""
+    detach_files(db, [a for a in db.exec(select(Attachment).where(Attachment.file_id.in_(file_ids or [-1]))).all()])
 
 
 # ---------------------------------------------------------------------------
@@ -89,13 +125,13 @@ def task_form(request, db, viewer, course, kind, task=None, values=None, error=N
             "title": task.title if task else "",
             "description": (task.description or "") if task else "",
             "due_at": jst_input_value(task.due_at) if task else "",
-            "mode": "file" if (task and task.file_id) else "text",
+            "mode": "file" if (task and task.content_text is None) else "text",
             "content_text": (task.content_text or "") if task else "",
             "guest_visible": task.guest_visible if task else False,
         }
-    current_file = db.get(StoredFile, task.file_id) if task and task.file_id else None
     return render(request, db, viewer, "partials/task_form.html", status_code=status_code, course=course,
-                  kind=kind, kinds=plural(kind), task=task, values=values, error=error, current_file=current_file)
+                  kind=kind, kinds=plural(kind), task=task, values=values, error=error,
+                  current_files=current_files(db, task), max_files=MAX_FILES_PER_ITEM)
 
 
 def read_task_form(title, description, due_at, mode, content_text, guest_visible):
@@ -131,7 +167,7 @@ def create_task(
     due_at: str = Form(""),
     mode: str = Form("text"),
     content_text: str = Form(""),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
     guest_visible: bool = Form(False),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
@@ -139,18 +175,11 @@ def create_task(
     course = get_course(db, viewer, course_id)
     kind = kind_of(kinds, course)
     values, due, error = read_task_form(title, description, due_at, mode, content_text, guest_visible)
-    if error is None and values["mode"] == "text" and not values["content_text"]:
-        error = "Write the content, or switch to a file."
-    if error is None and values["mode"] == "file" and not has_file(file):
-        error = "Choose a file, or switch to text."
     task = Task(course_id=course.id, kind=kind, title=values["title"], description=values["description"] or None,
                 due_at=due, guest_visible=guest_visible, created_by=viewer.id)
     if error is None:
         try:
-            if values["mode"] == "file":
-                task.file_id = save_upload(db, file, COURSEWORK_FILE_LIMIT, viewer.id).id
-            else:
-                task.content_text = values["content_text"]
+            apply_content(db, task, values["mode"], values["content_text"], files, [], viewer.id)
         except UploadRefused as refusal:
             error = str(refusal)
     if error:
@@ -186,7 +215,8 @@ def edit_task(
     due_at: str = Form(""),
     mode: str = Form("text"),
     content_text: str = Form(""),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
+    remove_files: list[int] = Form([]),
     guest_visible: bool = Form(False),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
@@ -194,20 +224,10 @@ def edit_task(
     task = get_task(db, viewer, task_id)
     course = get_course(db, viewer, task.course_id)
     values, due, error = read_task_form(title, description, due_at, mode, content_text, guest_visible)
-    new_file = has_file(file)
-    if error is None and values["mode"] == "text" and not values["content_text"]:
-        error = "Write the content, or switch to a file."
-    if error is None and values["mode"] == "file" and not new_file and not task.file_id:
-        error = "Choose a file, or switch to text."
-    old_file_id = None
+    removed = []
     if error is None:
         try:
-            if values["mode"] == "file" and new_file:
-                old_file_id, task.file_id = task.file_id, save_upload(db, file, COURSEWORK_FILE_LIMIT, viewer.id).id
-                task.content_text = None
-            elif values["mode"] == "text":
-                old_file_id, task.file_id = task.file_id, None
-                task.content_text = values["content_text"]
+            removed = apply_content(db, task, values["mode"], values["content_text"], files, remove_files, viewer.id)
         except UploadRefused as refusal:
             error = str(refusal)
     if error:
@@ -218,7 +238,7 @@ def edit_task(
     task.guest_visible, task.edited_at = guest_visible, utc_now()
     db.add(task)
     db.flush()
-    delete_stored_file(db, old_file_id)
+    remove_files_of(db, removed)
     db.commit()
     return hx_redirect(f"/classes/{course.id}/{plural(task.kind)}")
 
@@ -254,7 +274,7 @@ def student_history(request: Request, course_id: int, kinds: str, student_id: in
     own = viewer.id == student.id and can_submit(db, viewer, course)
     return render(request, db, viewer, "student_history.html", course=course, kind=kind, kinds=kinds,
                   student=student, student_gen=student_label(db, student), submissions=submissions,
-                  tasks=tasks, files=_files_for(db, [], submissions), own=own,
+                  tasks=tasks, files=attached_files(db, [], submissions), own=own,
                   can_moderate=viewer.is_admin)
 
 
@@ -275,11 +295,10 @@ def submission_form(request, db, viewer, course, kind, submission=None, values=N
             "guest_visible": submission.guest_visible if submission else False,
         }
     recent, older = task_choices(db, viewer, course, kind)
-    current_file = db.get(StoredFile, submission.file_id) if submission and submission.file_id else None
     return render(request, db, viewer, "partials/submission_form.html", status_code=status_code,
                   course=course, kind=kind, kinds=plural(kind), submission=submission, values=values, error=error,
                   recent=recent, older=older, show_older=any(t.id == values["task_id"] for t in older),
-                  current_file=current_file)
+                  current_files=current_files(db, submission), max_files=MAX_FILES_PER_ITEM)
 
 
 def read_submission_form(db, course, kind, title, description, task_id, mode, content_text, guest_visible):
@@ -326,7 +345,7 @@ def create_submission(
     task_id: str = Form(""),
     mode: str = Form("file"),
     content_text: str = Form(""),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
     guest_visible: bool = Form(False),
     viewer: Viewer = Depends(checked_member),
     db: Session = Depends(get_session),
@@ -335,19 +354,12 @@ def create_submission(
     kind = kind_of(kinds, course)
     values, error = read_submission_form(db, course, kind, title, description, task_id, mode, content_text,
                                          guest_visible)
-    if error is None and values["mode"] == "text" and not values["content_text"]:
-        error = "Write the content, or switch to a file."
-    if error is None and values["mode"] == "file" and not has_file(file):
-        error = "Choose a file, or switch to text."
     submission = Submission(course_id=course.id, kind=kind, student_id=viewer.id, title=values["title"] or None,
                             description=values["description"] or None, task_id=values["task_id"],
                             guest_visible=guest_visible)
     if error is None:
         try:
-            if values["mode"] == "file":
-                submission.file_id = save_upload(db, file, COURSEWORK_FILE_LIMIT, viewer.id).id
-            else:
-                submission.content_text = values["content_text"]
+            apply_content(db, submission, values["mode"], values["content_text"], files, [], viewer.id)
         except UploadRefused as refusal:
             error = str(refusal)
     if error:
@@ -386,7 +398,8 @@ def edit_submission(
     task_id: str = Form(""),
     mode: str = Form("file"),
     content_text: str = Form(""),
-    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
+    remove_files: list[int] = Form([]),
     guest_visible: bool = Form(False),
     viewer: Viewer = Depends(checked_member),
     db: Session = Depends(get_session),
@@ -397,21 +410,11 @@ def edit_submission(
     course = get_course(db, viewer, submission.course_id)
     values, error = read_submission_form(db, course, submission.kind, title, description, task_id, mode,
                                          content_text, guest_visible)
-    new_file = has_file(file)
-    if error is None and values["mode"] == "text" and not values["content_text"]:
-        error = "Write the content, or switch to a file."
-    if error is None and values["mode"] == "file" and not new_file and not submission.file_id:
-        error = "Choose a file, or switch to text."
-    old_file_id = None
+    removed = []
     if error is None:
         try:
-            if values["mode"] == "file" and new_file:
-                old_file_id = submission.file_id
-                submission.file_id = save_upload(db, file, COURSEWORK_FILE_LIMIT, viewer.id).id
-                submission.content_text = None
-            elif values["mode"] == "text":
-                old_file_id, submission.file_id = submission.file_id, None
-                submission.content_text = values["content_text"]
+            removed = apply_content(db, submission, values["mode"], values["content_text"], files, remove_files,
+                                    viewer.id)
         except UploadRefused as refusal:
             error = str(refusal)
     if error:
@@ -425,7 +428,7 @@ def edit_submission(
     submission.edited_at = utc_now()
     db.add(submission)
     db.flush()
-    delete_stored_file(db, old_file_id)
+    remove_files_of(db, removed)
     db.commit()
     return hx_redirect(f"/classes/{course.id}/{plural(submission.kind)}/students/{submission.student_id}")
 

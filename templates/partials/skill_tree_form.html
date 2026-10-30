@@ -1,6 +1,7 @@
 {% extends "partials/modal.html" %}
 {# One of your agents' skill tree: the big picture of where each of its skills
    (shared on the market or not) fits and is used in the agent. #}
+{% import "partials/dropzone.html" as drop %}
 {% block body %}
 {% set v = values %}
 {% if not agents %}
@@ -23,7 +24,7 @@
     <input type="radio" name="mode" value="file" aria-label="File (.md)" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
     <input type="radio" name="mode" value="text" aria-label="Type it" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
   </div>
-  <input x-show="mode === 'file'" type="file" name="file" accept=".md,.markdown,.txt,text/markdown,text/plain" class="file-input w-full">
+  <div x-show="mode === 'file'">{{ drop.dropzone("file", multiple=false, accept=".md,.markdown,.txt,text/markdown,text/plain") }}</div>
   <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="8" class="textarea w-full font-mono text-xs">{{ v.content_text }}</textarea>
   <div class="modal-action">
     <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>

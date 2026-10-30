@@ -23,6 +23,7 @@ AGENT_FILE_LIMIT = 5 * MB  # agent output files and monitor PDFs
 INBOX_FILE_LIMIT = 50 * MB  # one Inbox file
 INBOX_TOTAL_LIMIT = 200 * MB  # all waiting Inbox files together, on every agent
 STORAGE_TOTAL_LIMIT = 900 * MB  # Supabase's free plan has 1 GB; keep some room
+MAX_FILES_PER_ITEM = 20  # files on one assignment, exam or submission
 
 # Only these are ever shown inside a page. Everything else (including SVG,
 # HTML and PDF from members, which could run scripts or fake a page) is
@@ -81,6 +82,11 @@ def has_file(upload: UploadFile | None) -> bool:
     return upload is not None and bool(upload.filename)
 
 
+def chosen_files(uploads: list[UploadFile] | None) -> list[UploadFile]:
+    """The files actually chosen in a multi-file field (forms send an empty part otherwise)."""
+    return [upload for upload in uploads or [] if has_file(upload)]
+
+
 def total_stored(db: Session) -> int:
     return db.exec(select(func.coalesce(func.sum(StoredFile.size), 0))).one()
 
@@ -124,6 +130,29 @@ def save_upload(db: Session, upload: UploadFile, limit: int, uploaded_by: int | 
     db.add(stored)
     db.flush()  # gives it an id
     return stored
+
+
+def save_uploads(db: Session, uploads: list[UploadFile], limit: int, uploaded_by: int | None) -> list[StoredFile]:
+    """save_upload() for several files: all of them, or none.
+
+    If one is refused, the ones already stored are removed from storage again
+    (the caller rolls back their rows) and UploadRefused is raised.
+    """
+    total = sum(upload_size(upload) for upload in uploads)
+    if total_stored(db) + total > STORAGE_TOTAL_LIMIT:
+        raise UploadRefused(
+            "The site's file storage is nearly full, so new uploads are switched off. "
+            "Please ask an admin to make room."
+        )
+    saved: list[StoredFile] = []
+    try:
+        for upload in uploads:
+            saved.append(save_upload(db, upload, limit, uploaded_by))
+    except UploadRefused:
+        for stored in saved:
+            storage.delete(stored.storage_path)
+        raise
+    return saved
 
 
 def delete_stored_file(db: Session, file_id: int | None) -> None:

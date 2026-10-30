@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 from sqlmodel import Session, func, select
 
-from db import Agent, Course, Event, InboxFile, Monitor, Output, StoredFile, Submission, Task, User, database_size
+from db import Agent, Attachment, Course, Event, InboxFile, Monitor, Output, StoredFile, Submission, Task, User, database_size
 from permissions import course_name
 
 # Pie slice colours, always used in this order (checked for colour-blind
@@ -148,10 +148,14 @@ def file_breakdown(db: Session) -> list[View]:
 
     # What each file belongs to: (type, class id, person id, agent id).
     owners: dict[int, tuple[str, int | None, int | None, int | None]] = {}
-    for task in db.exec(select(Task).where(Task.file_id.is_not(None))).all():
-        owners[task.file_id] = ("Assignment & exam files", task.course_id, files[task.file_id].uploaded_by, None)
-    for sub in db.exec(select(Submission).where(Submission.file_id.is_not(None))).all():
-        owners[sub.file_id] = ("Submission files", sub.course_id, sub.student_id, None)
+    tasks = {t.id: t for t in db.exec(select(Task)).all()}
+    submissions = {s.id: s for s in db.exec(select(Submission)).all()}
+    for item in db.exec(select(Attachment)).all():
+        task, sub = tasks.get(item.task_id), submissions.get(item.submission_id)
+        if task is not None and item.file_id in files:
+            owners[item.file_id] = ("Assignment & exam files", task.course_id, files[item.file_id].uploaded_by, None)
+        elif sub is not None:
+            owners[item.file_id] = ("Submission files", sub.course_id, sub.student_id, None)
     for output in db.exec(select(Output).where(Output.file_id.is_not(None))).all():
         agent = agents.get(output.agent_id)
         owners[output.file_id] = ("Agent output files", agent and agent.course_id, agent and agent.owner_id, output.agent_id)

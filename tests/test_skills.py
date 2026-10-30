@@ -71,6 +71,23 @@ def test_skill_files_are_checked(taro, course):
     assert big.status_code == 400 and "100 KB" in big.text
 
 
+def test_several_skill_files_become_several_skills(engine, taro, course):
+    files = [("files", ("a.md", b"# Paper finder\nFind papers.", "text/markdown")),
+             ("files", ("b.md", b"# Chart maker\nMake charts.", "text/markdown"))]
+    reply = taro.post(f"/classes/{course}/skills", data={"mode": "file", "summary": "Mine", "share": "seminar",
+                                                         "name": "Ignored"}, files=files)
+    assert reply.status_code == 200
+    made = skills(engine)
+    assert [s.name for s in made] == ["Paper finder", "Chart maker"]
+    assert all(s.share == "seminar" and s.summary == "Mine" for s in made)
+
+
+def test_one_bad_skill_file_shares_none(engine, taro, course):
+    files = [("files", ("a.md", b"# Good\nFine.", "text/markdown")), ("files", ("empty.md", b"   ", "text/markdown"))]
+    reply = taro.post(f"/classes/{course}/skills", data={"mode": "file"}, files=files)
+    assert reply.status_code == 400 and "empty.md" in reply.text and skills(engine) == []
+
+
 def test_downloading_counts(engine, taro, course):
     share(taro, course)
     skill = skills(engine)[0]

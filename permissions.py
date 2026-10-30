@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 
 from db import (
     Agent,
+    Attachment,
     Course,
     CourseEnrolledGen,
     CourseEnrolledUser,
@@ -210,6 +211,16 @@ def can_download_file(db: Session, viewer: Viewer, stored: StoredFile) -> bool:
         # A switched-off Exams tab hides its files too (they come back if it's switched on again).
         course = db.get(Course, course_id)
         return course is not None and kind_switched_on(course, kind) and can_view_course(db, viewer, course)
+
+    attachment = db.exec(select(Attachment).where(Attachment.file_id == stored.id)).first()
+    if attachment is not None:
+        task = db.get(Task, attachment.task_id) if attachment.task_id else None
+        if task is not None:
+            return course_ok(task.course_id, task.kind) and can_see_task(viewer, task)
+        submission = db.get(Submission, attachment.submission_id) if attachment.submission_id else None
+        if submission is not None:
+            return course_ok(submission.course_id, submission.kind) and can_see_submission(viewer, submission)
+        return False
 
     task = db.exec(select(Task).where(Task.file_id == stored.id)).first()
     if task is not None:

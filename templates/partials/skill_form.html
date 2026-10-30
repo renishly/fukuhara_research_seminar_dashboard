@@ -1,6 +1,7 @@
 {% extends "partials/modal.html" %}
 {# Share a skill (or edit one). A skill shared again with the same name is
    updated: it keeps its identifier and gets the next version. #}
+{% import "partials/dropzone.html" as drop %}
 {% block body %}
 {% set v = values %}
 <form class="space-y-3" hx-post="{{ '/skills/%d/edit' % skill.id if skill else '/classes/%d/skills' % course.id }}"
@@ -10,7 +11,7 @@
   {% if not skill %}
   <fieldset class="fieldset">
     <legend class="fieldset-legend">Name (optional)</legend>
-    <input type="text" name="name" value="{{ v.name }}" maxlength="100" class="input w-full" placeholder="Left empty: the file's first heading">
+    <input type="text" name="name" value="{{ v.name }}" maxlength="100" class="input w-full" placeholder="Left empty (or several files): each file's first heading">
   </fieldset>
   {% endif %}
   <fieldset class="fieldset">
@@ -23,9 +24,9 @@
       <input type="radio" name="mode" value="file" aria-label="File (.md)" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
       <input type="radio" name="mode" value="text" aria-label="Type it" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
     </div>
-    <input x-show="mode === 'file'" type="file" name="file" accept=".md,.markdown,.txt,text/markdown,text/plain" class="file-input mt-2 w-full">
+    <div x-show="mode === 'file'" class="mt-2">{{ drop.dropzone("files", multiple=not skill, accept=".md,.markdown,.txt,text/markdown,text/plain") }}</div>
     <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="8" class="textarea mt-2 w-full font-mono text-xs" placeholder="# My skill&#10;&#10;When to use it, then the steps…">{{ v.content_text }}</textarea>
-    <p class="label whitespace-normal">Markdown text, up to 100 KB.{% if skill %} Leave empty to keep the current text (version {{ skill.version }}).{% endif %}</p>
+    <p class="label whitespace-normal">Markdown text, up to 100 KB.{% if not skill %} Drop several files to share them all at once: each becomes its own skill (named after its first heading), with the description and sharing below.{% endif %}{% if skill %} Leave empty to keep the current text (version {{ skill.version }}).{% endif %}</p>
   </fieldset>
   <fieldset class="fieldset">
     <legend class="fieldset-legend">Share with</legend>

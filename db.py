@@ -180,9 +180,9 @@ class Task(SQLModel, table=True):
     title: str
     description: str | None = None
     due_at: datetime  # UTC (entered in JST on the form)
-    # The content: text OR a file, never both.
+    # The content: text OR files (in Attachment), never both.
     content_text: str | None = None
-    file_id: int | None = Field(default=None, foreign_key="storedfile.id")
+    file_id: int | None = Field(default=None, foreign_key="storedfile.id")  # legacy: moved to Attachment
     # Unticked: guests don't see it at all.
     guest_visible: bool = False
     created_by: int | None = Field(default=None, foreign_key="user.id")
@@ -201,11 +201,22 @@ class Submission(SQLModel, table=True):
     description: str | None = None
     # Optional link to a Task of the same class and kind.
     task_id: int | None = Field(default=None, foreign_key="task.id")
-    content_text: str | None = None
-    file_id: int | None = Field(default=None, foreign_key="storedfile.id")
+    content_text: str | None = None  # text OR files (in Attachment), never both
+    file_id: int | None = Field(default=None, foreign_key="storedfile.id")  # legacy: moved to Attachment
     guest_visible: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     edited_at: datetime | None = None
+
+
+class Attachment(SQLModel, table=True):
+    """One file of an assignment, exam (task_id) or submission (submission_id).
+    Each can have several; position keeps them in the order they were added."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    task_id: int | None = Field(default=None, foreign_key="task.id", index=True)
+    submission_id: int | None = Field(default=None, foreign_key="submission.id", index=True)
+    file_id: int = Field(foreign_key="storedfile.id", unique=True)
+    position: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +505,7 @@ def create_db_and_tables(target_engine=None) -> None:
     with Session(target_engine) as session:
         seed_gens(session)
         move_legacy_monitors(session)
+        move_legacy_attachments(session)
 
 
 def seed_gens(session: Session) -> None:
@@ -532,6 +544,19 @@ def move_legacy_monitors(session: Session) -> None:
         agent.monitor_label = agent.monitor_updated_at = None
         agent.pinned_monitor = False
         session.add(agent)
+    session.commit()
+
+
+def move_legacy_attachments(session: Session) -> None:
+    """Move the single file of assignments, exams and submissions saved the old
+    way (in their file_id column) into the Attachment table. Runs at every
+    start, but only does anything once per item."""
+    for model, key in ((Task, "task_id"), (Submission, "submission_id")):
+        for item in session.exec(select(model).where(model.file_id.is_not(None))).all():
+            if session.exec(select(Attachment).where(Attachment.file_id == item.file_id)).first() is None:
+                session.add(Attachment(file_id=item.file_id, **{key: item.id}))
+            item.file_id = None
+            session.add(item)
     session.commit()
 
 

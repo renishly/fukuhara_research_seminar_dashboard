@@ -1,6 +1,7 @@
 {% extends "partials/modal.html" %}
-{# The assignment/exam form (admins). Content is text OR a file, chosen with
+{# The assignment/exam form (admins). Content is text OR files, chosen with
    the switch. On a problem the server sends this pop-up back with the error. #}
+{% import "partials/dropzone.html" as drop %}
 {% block body %}
 {% set v = values %}
 <form class="space-y-3" hx-post="{{ '/tasks/%d/edit' % task.id if task else '/classes/%d/%s' % (course.id, kinds) }}"
@@ -24,13 +25,30 @@
     <legend class="fieldset-legend">Content</legend>
     <div class="join">
       <input type="radio" name="mode" value="text" aria-label="Text" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
-      <input type="radio" name="mode" value="file" aria-label="File" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+      <input type="radio" name="mode" value="file" aria-label="Files" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
     </div>
     <textarea x-show="mode === 'text'" name="content_text" rows="6" maxlength="50000" class="textarea mt-2 w-full"
               placeholder="The {{ kind }} itself">{{ v.content_text }}</textarea>
     <div x-show="mode === 'file'" x-cloak class="mt-2 space-y-1">
-      <input type="file" name="file" class="file-input w-full">
-      <p class="label whitespace-normal">Up to 50 MB.{% if current_file %} Now: <strong>{{ current_file.filename }}</strong> (choose a file to replace it).{% endif %}</p>
+{% if current_files %}
+      <div class="text-sm">
+        <p class="font-semibold">Attached now</p>
+        <ul>
+          {% for f in current_files %}
+          <li class="flex items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-2" title="Tick to remove it when you save">
+              <input type="checkbox" name="remove_files" value="{{ f.id }}" class="checkbox checkbox-xs">
+              <span class="break-all">{{ f.filename }}</span>
+            </label>
+            <span class="text-xs text-base-content/60">({{ f.size | human_size }})</span>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="label whitespace-normal">Tick a file to remove it when you save. New files are added to these.</p>
+      </div>
+      {% endif %}
+      {{ drop.dropzone("files") }}
+      <p class="label whitespace-normal">Up to {{ max_files }} files, each up to 50 MB.</p>
     </div>
   </fieldset>
   <label class="flex cursor-pointer items-start gap-2 text-sm">

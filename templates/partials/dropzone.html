@@ -1,0 +1,16 @@
+{# A file field you can drop files onto, or click to choose them. The real
+   <input type="file"> is inside (so the form sends it as usual); ui.js adds
+   dropped files to it, highlights the area while files are dragged over, and
+   lists the chosen files (each with a button to take it out again).
+   multiple=false: a drop replaces the chosen file instead of adding to it. #}
+{% macro dropzone(name, multiple=true, accept=none, required=false, label=none) %}
+<label class="dropzone" data-dropzone>
+  <input type="file" name="{{ name }}" class="sr-only" {{ 'multiple' if multiple }}{% if accept %} accept="{{ accept }}"{% endif %}
+         {{ 'required' if required }} aria-label="{{ label or ('Files to upload' if multiple else 'File to upload') }}">
+  <span class="dropzone-prompt">
+    <strong>{{ "Drop files here" if multiple else "Drop a file here" }}</strong>
+    or <span class="link">click to choose</span>
+  </span>
+  <ul class="dropzone-list" data-dropzone-list></ul>
+</label>
+{% endmacro %}

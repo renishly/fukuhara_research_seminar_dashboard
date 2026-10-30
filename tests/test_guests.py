@@ -172,7 +172,7 @@ def test_guests_are_refused_on_every_upload_edit_and_control_route(engine, admin
         task = db.exec(select(Task)).one().id
         sub = db.exec(select(Submission)).one().id
     guest = make_person("guest")
-    file = {"file": ("x.txt", b"x", "text/plain")}
+    file = {"files": ("x.txt", b"x", "text/plain")}
     attempts = [
         ("/classes", {}), (f"/classes/{course}/edit", {}), (f"/classes/{course}/delete", {"password": "x"}),
         (f"/classes/{course}/assignments", {"title": "x", "due_at": due_in(5)}),

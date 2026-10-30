@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "partials/icons.html" as icon %}
+{% import "partials/dropzone.html" as drop %}
 {% block title %}{{ agent.name }} · Agent{% endblock %}
 {% block content %}
 {# Layout: Monitor, Outputs and Activity in the main column. The owner's
@@ -86,7 +87,7 @@
             x-on:htmx:xhr:progress="progress = $event.detail.total ? Math.round($event.detail.loaded / $event.detail.total * 100) : null"
             x-on:htmx:after-request="progress = null; if ($event.detail.successful) $el.reset()">
         <fieldset class="space-y-2" {{ 'disabled' if not agent.accepts_inbox }}>
-          <input type="file" name="files" multiple required class="file-input w-full" aria-label="Files to upload">
+          {{ drop.dropzone("files", required=true) }}
           <textarea name="note" rows="2" maxlength="1000" placeholder="A note for the agent (optional)" class="textarea w-full"
                     aria-label="Note for the agent"></textarea>
           <progress x-show="progress !== null" x-cloak class="progress w-full" :value="progress" max="100"></progress>

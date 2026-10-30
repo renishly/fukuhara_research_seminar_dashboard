@@ -32,7 +32,7 @@
         <p class="text-sm">For: <a href="/classes/{{ course.id }}/{{ kinds }}" class="link">{{ mask(task.title) }}</a></p>
         {% endif %}
         {% if s.description %}<p class="whitespace-pre-line break-words">{{ mask(s.description) }}</p>{% endif %}
-        {{ content.show(s, files, mask) }}
+        {{ content.show(s, files["submissions"].get(s.id, []), mask) }}
       </div>
       <div class="shrink-0 space-y-1 text-right font-mono text-xs">
         <p>Submitted {{ s.created_at | jst }}</p>

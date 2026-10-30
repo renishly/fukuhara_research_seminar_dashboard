@@ -1,7 +1,8 @@
 {% extends "partials/modal.html" %}
-{# The submission form (the student's own). Content is a file (the default)
+{# The submission form (the student's own). Content is files (the default)
    or text. The dropdown lists the 5 most recent assignments/exams of this tab;
    "Show older..." adds the rest. #}
+{% import "partials/dropzone.html" as drop %}
 {% block body %}
 {% set v = values %}
 <form class="space-y-3" hx-post="{{ '/submissions/%d/edit' % submission.id if submission else '/classes/%d/%s/submissions' % (course.id, kinds) }}"
@@ -41,12 +42,29 @@
   <fieldset class="fieldset">
     <legend class="fieldset-legend">Content</legend>
     <div class="join">
-      <input type="radio" name="mode" value="file" aria-label="File" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+      <input type="radio" name="mode" value="file" aria-label="Files" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
       <input type="radio" name="mode" value="text" aria-label="Text" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
     </div>
     <div x-show="mode === 'file'" class="mt-2 space-y-1">
-      <input type="file" name="file" class="file-input w-full">
-      <p class="label whitespace-normal">Up to 50 MB.{% if current_file %} Now: <strong>{{ current_file.filename }}</strong> (choose a file to replace it).{% endif %}</p>
+{% if current_files %}
+      <div class="text-sm">
+        <p class="font-semibold">Attached now</p>
+        <ul>
+          {% for f in current_files %}
+          <li class="flex items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-2" title="Tick to remove it when you save">
+              <input type="checkbox" name="remove_files" value="{{ f.id }}" class="checkbox checkbox-xs">
+              <span class="break-all">{{ f.filename }}</span>
+            </label>
+            <span class="text-xs text-base-content/60">({{ f.size | human_size }})</span>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="label whitespace-normal">Tick a file to remove it when you save. New files are added to these.</p>
+      </div>
+      {% endif %}
+      {{ drop.dropzone("files") }}
+      <p class="label whitespace-normal">Up to {{ max_files }} files, each up to 50 MB.</p>
     </div>
     <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="6" maxlength="50000" class="textarea mt-2 w-full">{{ v.content_text }}</textarea>
   </fieldset>

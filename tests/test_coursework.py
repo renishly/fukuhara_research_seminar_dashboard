@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 import uploads
 from conftest import PASSWORD
-from db import StoredFile, Submission, Task
+from db import Attachment, StoredFile, Submission, Task
 from web import JST, due_status, jst_input_value
 
 
@@ -19,13 +19,20 @@ def due_in(hours: float) -> str:
     return jst_input_value(datetime.now(timezone.utc) + timedelta(hours=hours))
 
 
+def as_files(file):
+    """The upload part of a form: one (name, bytes, type) file or a list of them."""
+    if not file:
+        return None
+    return [("files", one) for one in (file if isinstance(file, list) else [file])]
+
+
 def post_task(person, course, kinds="assignments", title="Essay 1", hours=24 * 7, text="Write 1000 words.",
               file=None, guest_visible=False):
     data = {"title": title, "description": "About the reading", "due_at": due_in(hours),
             "mode": "file" if file else "text", "content_text": text if not file else ""}
     if guest_visible:
         data["guest_visible"] = "true"
-    return person.post(f"/classes/{course}/{kinds}", data=data, files={"file": file} if file else None)
+    return person.post(f"/classes/{course}/{kinds}", data=data, files=as_files(file))
 
 
 def task_id(engine, title):
@@ -40,7 +47,7 @@ def submit(person, course, kinds="assignments", title="My essay", task=None, tex
     if guest_visible:
         data["guest_visible"] = "true"
     return person.post(f"/classes/{course}/{kinds}/submissions", data=data,
-                       files={"file": file} if text is None else None)
+                       files=as_files(file) if text is None else None)
 
 
 def only(engine, model):
@@ -92,19 +99,19 @@ def test_task_needs_title_due_time_and_content(admin, course):
     assert "Write the content" in post_task(admin, course, text="").text
     no_file = admin.post(f"/classes/{course}/assignments",
                          data={"title": "T", "due_at": due_in(5), "mode": "file"})
-    assert "Choose a file" in no_file.text
+    assert "Choose at least one file" in no_file.text
 
 
 def test_task_with_a_file_keeps_exactly_one_kind_of_content(engine, admin, course):
     post_task(admin, course, file=("brief.pdf", b"%PDF-1.4 brief", "application/pdf"))
     task = only(engine, Task)[0]
-    assert task.file_id and task.content_text is None
+    assert len(only(engine, Attachment)) == 1 and task.content_text is None
     # Switching to text deletes the old file.
     admin.post(f"/tasks/{task.id}/edit", data={"title": "Essay 1", "due_at": due_in(5), "mode": "text",
                                                "content_text": "Now text"})
     task = only(engine, Task)[0]
-    assert task.file_id is None and task.content_text == "Now text"
-    assert only(engine, StoredFile) == []
+    assert task.content_text == "Now text"
+    assert only(engine, StoredFile) == [] and only(engine, Attachment) == []
 
 
 def test_due_indicator():
@@ -166,8 +173,8 @@ def test_only_the_owner_edits_or_deletes_a_submission(engine, admin, taro, make_
     assert hanako.post(f"/submissions/{sub.id}/delete").status_code == 403
     assert taro.post(f"/submissions/{sub.id}/edit", data=edit).status_code == 200
     sub = only(engine, Submission)[0]
-    assert sub.title == "Changed" and sub.content_text == "text now" and sub.file_id is None and sub.edited_at
-    assert only(engine, StoredFile) == []  # the replaced file is gone
+    assert sub.title == "Changed" and sub.content_text == "text now" and sub.edited_at
+    assert only(engine, StoredFile) == [] and only(engine, Attachment) == []  # the replaced file is gone
     assert taro.post(f"/submissions/{sub.id}/delete").status_code == 200
     assert only(engine, Submission) == []
 
@@ -197,10 +204,10 @@ def test_submission_without_a_task_is_fine(engine, taro, course):
 def test_submission_content_is_text_or_file(engine, taro, course):
     assert "Write the content" in submit(taro, course, text="").text
     no_file = taro.post(f"/classes/{course}/assignments/submissions", data={"mode": "file"})
-    assert "Choose a file" in no_file.text
+    assert "Choose at least one file" in no_file.text
     submit(taro, course, text="Plain text")
     sub = only(engine, Submission)[0]
-    assert sub.content_text == "Plain text" and sub.file_id is None
+    assert sub.content_text == "Plain text" and only(engine, Attachment) == []
 
 
 def test_late_badge(engine, admin, taro, course):
@@ -282,6 +289,94 @@ def test_file_permissions(engine, admin, taro, make_person, course, create_class
     assert hidden_from.get(f"/files/{stored.id}").status_code == 404
     assert make_person("guest").get(f"/files/{stored.id}").status_code == 404  # not ticked for guests
     assert admin.get("/files/9999").status_code == 404
+
+
+def test_a_submission_can_have_several_files(engine, admin, taro, course):
+    submit(taro, course, file=[("one.txt", b"1", "text/plain"), ("two.pdf", b"%PDF-1.4 two", "application/pdf"),
+                               ("three.png", b"png", "image/png")])
+    [sub] = only(engine, Submission)
+    attached = sorted(only(engine, Attachment), key=lambda a: a.position)
+    names = {f.id: f.filename for f in only(engine, StoredFile)}
+    assert [names[a.file_id] for a in attached] == ["one.txt", "two.pdf", "three.png"]
+    assert all(a.submission_id == sub.id for a in attached)
+    page = admin.get(f"/classes/{course}/assignments/students/{taro.id}").text
+    assert all(name in page for name in ("one.txt", "two.pdf", "three.png"))
+    assert all(admin.get(f"/files/{a.file_id}").status_code == 200 for a in attached)
+
+
+def test_editing_removes_ticked_files_and_adds_new_ones(engine, taro, course):
+    submit(taro, course, file=[("keep.txt", b"k", "text/plain"), ("drop.txt", b"d", "text/plain")])
+    [sub] = only(engine, Submission)
+    by_name = {f.filename: f for f in only(engine, StoredFile)}
+    form = taro.get(f"/submissions/{sub.id}/edit").text
+    assert "Attached now" in form and "keep.txt" in form and "drop.txt" in form
+    dropped_path = Path(os.environ["LOCAL_FILES_DIR"]) / by_name["drop.txt"].storage_path
+    taro.post(f"/submissions/{sub.id}/edit", data={"mode": "file", "remove_files": str(by_name["drop.txt"].id)},
+              files=as_files(("new.txt", b"n", "text/plain")))
+    assert sorted(f.filename for f in only(engine, StoredFile)) == ["keep.txt", "new.txt"]
+    assert len(only(engine, Attachment)) == 2 and not dropped_path.exists()
+    # Removing every file without adding one is refused (switch to text instead).
+    ids = [str(a.file_id) for a in only(engine, Attachment)]
+    refused = taro.post(f"/submissions/{sub.id}/edit", data={"mode": "file", "remove_files": ids})
+    assert "Choose at least one file" in refused.text and len(only(engine, Attachment)) == 2
+
+
+def test_tasks_can_have_several_files_too(engine, admin, taro, course):
+    post_task(admin, course, file=[("brief.pdf", b"%PDF-1.4 b", "application/pdf"), ("data.csv", b"a,b", "text/csv")])
+    [task] = only(engine, Task)
+    assert len(only(engine, Attachment)) == 2 and task.content_text is None
+    page = taro.get(f"/classes/{course}/assignments").text
+    assert "brief.pdf" in page and "data.csv" in page
+    admin.post(f"/tasks/{task.id}/delete")
+    assert only(engine, Attachment) == [] and only(engine, StoredFile) == []
+
+
+def test_one_refused_file_stores_none_of_them(engine, taro, course, monkeypatch):
+    monkeypatch.setattr(routes_coursework(), "COURSEWORK_FILE_LIMIT", 10)
+    kept = lambda: {p for p in Path(os.environ["LOCAL_FILES_DIR"]).rglob("*") if p.is_file()}  # noqa: E731
+    before = kept()
+    reply = submit(taro, course, file=[("small.txt", b"ok", "text/plain"), ("big.txt", b"x" * 11, "text/plain")])
+    assert "big.txt is too big" in reply.text
+    assert only(engine, StoredFile) == [] and only(engine, Submission) == []
+    assert kept() == before  # small.txt was stored, then removed again
+
+
+def test_at_most_20_files(engine, taro, course):
+    reply = submit(taro, course, file=[(f"{n}.txt", b"x", "text/plain") for n in range(21)])
+    assert "at most 20 files" in reply.text and only(engine, StoredFile) == []
+
+
+def test_old_single_files_move_to_attachments(engine, taro, course):
+    from db import move_legacy_attachments
+
+    submit(taro, course, text="placeholder")
+    with Session(engine) as db:
+        stored = StoredFile(storage_path="old/path.txt", filename="old.txt", content_type="text/plain", size=1)
+        db.add(stored)
+        db.flush()
+        sub = db.exec(select(Submission)).one()
+        sub.content_text, sub.file_id = None, stored.id
+        db.add(sub)
+        db.commit()
+        move_legacy_attachments(db)
+        move_legacy_attachments(db)  # only once
+        [attachment] = db.exec(select(Attachment)).all()
+        assert attachment.submission_id == sub.id and attachment.file_id == stored.id
+        assert db.get(Submission, sub.id).file_id is None
+
+
+def test_guests_cannot_download_attached_files_unless_ticked(engine, taro, make_person, course):
+    submit(taro, course, file=[("a.txt", b"a", "text/plain"), ("b.txt", b"b", "text/plain")])
+    guest = make_person("guest")
+    assert all(guest.get(f"/files/{a.file_id}").status_code == 404 for a in only(engine, Attachment))
+    submit(taro, course, title="Open", file=("c.txt", b"c", "text/plain"), guest_visible=True)
+    open_file = [f for f in only(engine, StoredFile) if f.filename == "c.txt"][0]
+    assert guest.get(f"/files/{open_file.id}").status_code == 200
+
+
+def routes_coursework():
+    import routes.coursework
+    return routes.coursework
 
 
 def test_text_content_is_shown_as_plain_text(admin, taro, course):

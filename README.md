@@ -55,7 +55,7 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | `web.py` | Templates, times in JST, small reply helpers |
 | `routes/` | The pages and the API (see the diagram) |
 | `templates/` | The HTML pages; `templates/partials/` are pieces HTMX refreshes or opens |
-| `static/` | `tailwind.css` (built), `theme.css` (the "bluepaper" look), `ui.js` (drag-to-pan, centring, the grid) |
+| `static/` | `tailwind.css` (built), `theme.css` (the "bluepaper" look), `ui.js` (drag-to-pan, centring, the grid, drop zones) |
 | `connector/` | The downloadable Python connector, and a prompt for building one in any language |
 | `agent/agent.py` | A demo agent built on the connector |
 | `tests/` | Automated tests (`pytest`), and `TEST_REPORT.md` |
@@ -238,6 +238,14 @@ python scripts/seed_demo.py
 ```
 
 The demo accounts and their test password are listed at the top of the script. It refuses to run against anything but a local SQLite file, and the `demo/` folder is git-ignored.
+
+## Uploading files
+
+Every upload field is a **drop zone**: drop files on it, or click it to choose them. Dropping or choosing more adds to the files already chosen, and each chosen file has a **×** to take it out before sending. Files dropped anywhere else on the page are ignored (so a near miss doesn't open the file and lose what you typed).
+
+- **Assignments, exams and submissions** can have up to 20 files each (up to 50 MB per file). When editing, tick a file under "Attached now" to remove it; new files are added to the ones already there. If one file is refused, none of that upload is kept.
+- **Skills**: dropping several skill files on **+ Share a skill** shares each one as its own skill, named after its first heading.
+- The **agent Inbox** takes several files at once too; skill trees take one.
 
 ## Previews of files
 
