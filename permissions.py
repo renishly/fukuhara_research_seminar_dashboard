@@ -29,6 +29,8 @@ from db import (
     InboxFile,
     Monitor,
     Output,
+    Skill,
+    SkillTree,
     StoredFile,
     Submission,
     Task,
@@ -245,4 +247,27 @@ def can_download_file(db: Session, viewer: Viewer, stored: StoredFile) -> bool:
         agent = db.get(Agent, inbox.agent_id)
         return agent is not None and owns_agent(viewer, agent)
 
+    tree = db.exec(select(SkillTree).where(SkillTree.view_file_id == stored.id)).first()
+    if tree is not None:
+        return can_see_tree(db, viewer, tree.agent_id)
+
     return False  # not attached to anything: nobody
+
+
+# ---------------------------------------------------------------------------
+# Skill trees (the Agent Skills market, see market.py)
+# ---------------------------------------------------------------------------
+
+
+def can_see_tree(db: Session, viewer: Viewer, agent_id: int | None) -> bool:
+    """May this viewer see this agent's skill tree? Members only: those who can
+    see the agent's class, or anyone if the agent shared a skill with the whole seminar."""
+    if agent_id is None or not viewer.is_member:
+        return False
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return False
+    if db.exec(select(Skill).where(Skill.agent_id == agent_id, Skill.share == "seminar")).first() is not None:
+        return True
+    course = db.get(Course, agent.course_id)
+    return course is not None and can_view_course(db, viewer, course)

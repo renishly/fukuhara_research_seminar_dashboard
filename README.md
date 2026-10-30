@@ -212,7 +212,10 @@ Below the Agents tab's student window, members (never guests) share **skill file
 
 - **Identifiers.** Every skill has an identifier like `skill-12` and an address like `https://your-site/api/skills/12/content`. Give either to an agent: `read_skill("skill-12")` always returns the **latest** version, so an agent can use a shared skill in its normal loop without keeping a copy that goes out of date. Posting a skill again with the same name updates it (same identifier, next version).
 - **Class or seminar.** Each skill is shared with *this class only* or the *whole seminar*. The market opens on the current class (its own skills, including the ones it shared with everyone); **Whole seminar** adds skills shared from every class.
-- **Skill trees.** For each agent, a skill tree describes where each of its skills (shared or not) fits in the agent. Upload one with **+ Skill tree**, or from an agent with `set_skill_tree(...)`.
+- **Skill trees.** For each agent, a skill tree describes where each of its skills (shared or not) fits in the agent. It has two versions:
+  - the **AI version** (Markdown, required): what the organizer and agents read. Upload it with **+ Skill tree**, or from an agent with `set_skill_tree(...)`;
+  - an optional **user-friendly version** for people: a PDF, HTML page or image (up to 20 MB), added with the AI version or later (**+ Skill tree** again, or `set_skill_tree_view("tree.pdf")`). Members see it first, with the AI version behind **Show the AI version (.md)**. HTML is shown sealed off, without scripts.
+- **The built-in connector skill.** "Dashboard connector" (`skill-connector`) comes with the dashboard and is always on every class's market, at the top. It is the connector instructions ("Implement connector → Prompt"), rewritten at every start, so its version goes up whenever the dashboard's API changes. Give an agent `skill-connector` and tell it to re-read it when a dashboard call fails in a new way: it can then adapt its connection. Nobody (not even an admin) can edit or remove it, and the organizer leaves it alone.
 - **Filters**: search, category, shared by (members or agents), "Mine", and sort (by category, recently updated, most downloaded, name, newest).
 
 ### The market organizer
@@ -225,7 +228,7 @@ The organizer sorts skills into categories **by function** (data retrieval, deci
   1. Make a long random value: `python -c "import secrets; print(secrets.token_hex(32))"`.
   2. On Render, set `ORGANIZER_TOKEN` to it (and `OPENROUTER_API_KEY` to your key).
   3. On GitHub, open the repository's **Settings → Secrets and variables → Actions** and add two repository secrets: `ORGANIZER_TOKEN` (the same value) and `DASHBOARD_URL` (e.g. `https://fukuhara-seminar.onrender.com`).
-  4. On the **Actions** tab, open "Organize the skills market" and use **Run workflow** once to check it works.
+  4. On the **Actions** tab, open "Organize the skills market" and use **Run workflow** once to check it works. Its log ends with the site's answer: "Organized N skills with the AI model" means the OpenRouter key works; "with keyword rules (no OPENROUTER_API_KEY set)" means Render doesn't have the key; "No update is due right now" means it was checked but nothing needed sorting (the token and address are right).
 
   GitHub sometimes starts scheduled jobs a few minutes late. The site also checks every few minutes while it's awake, and catches up as soon as it wakes after 15:00.
 

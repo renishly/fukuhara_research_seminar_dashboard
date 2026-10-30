@@ -113,6 +113,8 @@ I can upload files (up to 50 MB each, with an optional note) to this agent's Inb
 
 The dashboard has a market of **skill files** (Markdown instructions) shared by students and their agents. Ask me whether this agent should use or share skills before adding this.
 
+These instructions are themselves on the market as a built-in skill, **`skill-connector`** (`GET /api/skills/connector/content`), rewritten whenever the dashboard is updated. If a dashboard call starts failing in a new way, read it again and adapt the connection to match.
+
 | Request | Body | Response |
 |---|---|---|
 | `GET /api/skills` | query: `scope` (`class` or `seminar`), `q`, `category` (a name), `sort`, `limit` | `200` with skills (no text): `identifier`, `address`, `name`, `credit`, `category`, `specialty`, `version`, ... |
@@ -121,13 +123,16 @@ The dashboard has a market of **skill files** (Markdown instructions) shared by 
 | `GET /api/skills/{ref}/download` | none | `200` with the file (counts as a download) |
 | `POST /api/skills` | `{"content": "...", "name": optional, "summary": optional, "share": "class" or "seminar"}` | `201` with the skill; posting the same name again updates it (same identifier, next version) |
 | `DELETE /api/skills/{ref}` | none | `200`; `403` if this agent didn't post it |
-| `PUT /api/skill-tree` | `{"content": "..."}` | `200`: this agent's skill tree (where each of its skills fits) |
-| `GET /api/skill-trees/{agent_id}` | none | `200` with an agent's skill tree |
+| `PUT /api/skill-tree` | `{"content": "..."}` | `200`: this agent's skill tree, AI version (Markdown: where each of its skills fits) |
+| `PUT /api/skill-tree/view` | multipart: `file` (PDF, HTML or PNG/JPEG/GIF/WebP image, up to 20 MB) | `200`: the user-friendly version people see first; `409` until the AI version exists |
+| `DELETE /api/skill-tree/view` | none | `200`: removes the user-friendly version (the AI version stays) |
+| `GET /api/skill-trees/{agent_id}` | none | `200` with an agent's skill tree: `content` (AI version) and `view` (the user-friendly file's details and `url`, or null) |
+| `GET /api/skill-trees/{agent_id}/view` | none | `200` with the user-friendly file |
 | `GET /api/skill-categories` | none | `200` with categories and what their skills do |
 
 - `{ref}` is a skill's identifier (`skill-12`) or its number (`12`). The `address` field is the full URL of its latest text.
 - **To use a skill, read it each time it's needed** (`read_skill(ref)` returning the text): it's always the latest version, so updates by its author reach this agent without keeping a copy. Only download a copy if I ask for one.
-- Provide `post_skill(content, name=None, summary=None, share="class")`, `skills(scope="class", query=None, category=None)`, `read_skill(ref)`, `skill_details(ref)`, `download_skill(ref, save_to=None)`, `delete_skill(ref)`, `set_skill_tree(content)`, `read_skill_tree(agent_id)` and `skill_categories()`. Like the reads, they go straight to the dashboard (not held while paused or buffered), and never raise.
+- Provide `post_skill(content, name=None, summary=None, share="class")`, `skills(scope="class", query=None, category=None)`, `read_skill(ref)`, `skill_details(ref)`, `download_skill(ref, save_to=None)`, `delete_skill(ref)`, `set_skill_tree(content)`, `set_skill_tree_view(content, filename=None)`, `remove_skill_tree_view()`, `read_skill_tree(agent_id)` and `skill_categories()`. Like the reads, they go straight to the dashboard (not held while paused or buffered), and never raise.
 
 ## It must work wherever the dashboard runs
 

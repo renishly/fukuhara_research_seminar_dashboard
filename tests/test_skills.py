@@ -34,8 +34,9 @@ def share(person, course, content=RETRIEVAL, name="", summary="", share="class")
 
 
 def skills(engine):
+    """Members' and agents' skills (not the built-in ones)."""
     with Session(engine) as db:
-        return db.exec(select(Skill).order_by(Skill.id)).all()
+        return db.exec(select(Skill).where(Skill.builtin.is_(None)).order_by(Skill.id)).all()
 
 
 def market_html(person, course, **params):
@@ -86,6 +87,72 @@ def test_one_bad_skill_file_shares_none(engine, taro, course):
     files = [("files", ("a.md", b"# Good\nFine.", "text/markdown")), ("files", ("empty.md", b"   ", "text/markdown"))]
     reply = taro.post(f"/classes/{course}/skills", data={"mode": "file"}, files=files)
     assert reply.status_code == 400 and "empty.md" in reply.text and skills(engine) == []
+
+
+def test_the_connector_skill_is_built_in_everywhere(engine, admin, taro, client, make_person, course, create_class,
+                                                   create_agent):
+    other = create_class(title="Other", enrolled_gens=[9])
+    for course_id in (course, other):
+        assert "skill-connector" in market_html(taro, course_id)  # every class's market, class view too
+    with Session(engine) as db:
+        builtin = db.exec(select(Skill).where(Skill.builtin == "connector")).one()
+    assert builtin.share == "seminar" and builtin.course_id is None and builtin.owner_id is None
+    detail = taro.get(f"/skills/{builtin.id}").text
+    assert "built in" in detail and "Edit" not in detail and "Remove it from the market" not in detail
+    assert "http://testserver/api/skills/connector/content" in detail and "{{DOWNLOADED_FROM}}" not in detail
+    # Nobody edits or removes it, not even an admin.
+    assert taro.post(f"/skills/{builtin.id}/edit", data={"summary": "x"}).status_code == 403
+    assert admin.post(f"/skills/{builtin.id}/delete").status_code == 403
+    # Agents read it by its fixed identifier, with this site's address filled in.
+    create_agent(taro, course, "helper")
+    text = client.get("/api/skills/skill-connector/content", headers=api("helper"))
+    assert text.status_code == 200 and text.headers["x-skill-version"] == "1"
+    assert text.text.startswith("# Dashboard connector (built-in skill)") and "/api/outputs" in text.text
+    assert "http://testserver" in text.text and "{{DOWNLOADED_FROM}}" not in text.text
+    assert client.delete("/api/skills/skill-connector", headers=api("helper")).status_code == 403
+    # Guests never see the market.
+    assert make_person("guest").get(f"/skills/{builtin.id}").status_code in (403, 404)
+
+
+def test_the_connector_skill_follows_the_dashboard(engine, monkeypatch):
+    with Session(engine) as db:
+        market.sync_builtin_skills(db)  # unchanged: same version
+        assert db.exec(select(Skill).where(Skill.builtin == "connector")).one().version == 1
+        changed = market.builtin_skills()
+        changed["connector"]["content"] += "\nA new endpoint."
+        monkeypatch.setattr(market, "builtin_skills", lambda: changed)
+        market.sync_builtin_skills(db)
+        skill = db.exec(select(Skill).where(Skill.builtin == "connector")).one()
+        assert skill.version == 2 and skill.content.endswith("A new endpoint.")
+
+
+def test_older_databases_let_skills_have_no_class_or_owner(engine):
+    from sqlalchemy import inspect
+
+    from db import allow_empty_columns, create_db_and_tables
+
+    # Simulate the older table, where class and owner were required.
+    with engine.begin() as connection:
+        connection.exec_driver_sql('DROP TABLE "skill"')
+        connection.exec_driver_sql(
+            'CREATE TABLE "skill" (id INTEGER PRIMARY KEY, course_id INTEGER NOT NULL, share VARCHAR NOT NULL, '
+            'owner_id INTEGER NOT NULL, agent_id INTEGER, agent_name VARCHAR, name VARCHAR NOT NULL, '
+            'summary VARCHAR, content TEXT NOT NULL, version INTEGER NOT NULL, downloads INTEGER NOT NULL, '
+            'category_id INTEGER, specialty VARCHAR, organized_version INTEGER, created_at DATETIME NOT NULL, '
+            'updated_at DATETIME NOT NULL)')
+        connection.exec_driver_sql('CREATE INDEX "ix_skill_course_id" ON "skill" (course_id)')
+        connection.exec_driver_sql(
+            "INSERT INTO skill VALUES (7, 1, 'class', 1, NULL, NULL, 'Old', NULL, '# Old', 3, 0, NULL, NULL, NULL, "
+            "'2026-01-01', '2026-01-01')")
+    assert allow_empty_columns(engine) == ["skill.course_id", "skill.owner_id"]
+    create_db_and_tables(engine)  # adds the built-in skill
+    columns = {c["name"]: c for c in inspect(engine).get_columns("skill")}
+    assert columns["course_id"]["nullable"] and columns["owner_id"]["nullable"] and "builtin" in columns
+    with Session(engine) as db:
+        old = db.get(Skill, 7)
+        assert old.name == "Old" and old.version == 3
+        assert db.exec(select(Skill).where(Skill.builtin == "connector")).one().id != 7
+    assert allow_empty_columns(engine) == []  # only once
 
 
 def test_downloading_counts(engine, taro, course):
@@ -176,9 +243,10 @@ def test_agents_post_read_update_and_download_skills(engine, client, taro, cours
     client.get(f"/api/skills/{info['id']}/download", headers=api("helper"))
     assert skills(engine)[0].downloads == 1
     listed = client.get("/api/skills", headers=api("helper")).json()
-    assert [s["identifier"] for s in listed] == [info["identifier"]] and "content" not in listed[0]
+    assert [s["identifier"] for s in listed] == ["skill-connector", info["identifier"]]  # built-in first
+    assert "content" not in listed[1]
     assert "Yamada Taro's agent" in client.get("/api/skills", params={"scope": "seminar"},
-                                                headers=api("helper")).json()[0]["credit"]
+                                                headers=api("helper")).json()[1]["credit"]
 
 
 def test_agents_only_delete_their_own_skills(engine, client, taro, make_person, course, create_agent):
@@ -195,7 +263,8 @@ def test_agents_see_skills_as_their_owner_does(engine, client, taro, course, cre
     other_class = create_class(title="Other", enrolled_gens=[9])
     share(taro, course, name="Here only", share="class")
     create_agent(taro, other_class, "elsewhere")
-    assert client.get("/api/skills", headers=api("elsewhere")).json() == []  # its class: nothing
+    listed = client.get("/api/skills", headers=api("elsewhere")).json()
+    assert [s["identifier"] for s in listed] == ["skill-connector"]  # its class: only the built-in skill
     skill = skills(engine)[0]
     # Its owner can see the origin class, so asking for the skill directly works.
     assert client.get(f"/api/skills/{skill.id}", headers=api("elsewhere")).status_code == 200
@@ -222,6 +291,94 @@ def test_skill_trees(engine, client, taro, make_person, course, create_agent):
     assert refused.status_code == 403
 
 
+def tree_files(engine):
+    from db import StoredFile
+
+    with Session(engine) as db:
+        return db.exec(select(StoredFile)).all()
+
+
+def test_a_skill_tree_needs_its_ai_version_first(engine, taro, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    pdf = {"view": ("tree.pdf", b"%PDF-1.4 tree", "application/pdf")}
+    refused = taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "file"}, files=pdf)
+    assert refused.status_code == 400 and "AI version (.md) comes first" in refused.text
+    # Both at once works.
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "text", "content_text": "# Tree"},
+              files=pdf)
+    with Session(engine) as db:
+        tree = db.exec(select(SkillTree)).one()
+        assert tree.content == "# Tree" and tree.view_file_id is not None
+
+
+def test_people_see_the_user_friendly_version_first(engine, taro, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "text", "content_text": "# AI tree"})
+    page = taro.get(f"/skill-trees/{agent_id}").text
+    assert "# AI tree" in page and "<iframe" not in page and "add one" in page  # only the AI version so far
+    # Later, just the user-friendly version (the AI version is kept).
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "file"},
+              files={"view": ("tree.html", b"<h1>My tree</h1>", "text/html")})
+    [stored] = tree_files(engine)
+    page = taro.get(f"/skill-trees/{agent_id}").text
+    assert f'src="/files/{stored.id}/preview"' in page and "Show the AI version (.md)" in page and "# AI tree" in page
+    assert stored.content_type == "text/html"
+    preview = taro.get(f"/files/{stored.id}/preview")
+    assert preview.status_code == 200 and "sandbox" in preview.headers["content-security-policy"]
+    # Replacing it deletes the old file; an image is shown directly.
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "file"},
+              files={"view": ("tree.png", b"png", "image/png")})
+    [stored] = tree_files(engine)
+    assert stored.filename == "tree.png" and f'<img src="/files/{stored.id}"' in taro.get(f"/skill-trees/{agent_id}").text
+    with Session(engine) as db:
+        assert db.exec(select(SkillTree)).one().content == "# AI tree"
+
+
+def test_user_friendly_versions_are_checked_and_protected(engine, taro, make_person, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "text", "content_text": "# T"})
+    for name, data in (("tree.docx", b"x"), ("fake.pdf", b"<html>")):
+        reply = taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "file"},
+                          files={"view": (name, data, "application/octet-stream")})
+        assert reply.status_code == 400
+    taro.post(f"/classes/{course}/skill-trees", data={"agent_id": agent_id, "mode": "file"},
+              files={"view": ("tree.pdf", b"%PDF-1.4 t", "application/pdf")})
+    [stored] = tree_files(engine)
+    assert make_person("guest").get(f"/files/{stored.id}").status_code == 404  # members only
+    hanako = make_person("student", "hanako", gen=9)
+    assert hanako.get(f"/files/{stored.id}").status_code == 200
+    assert hanako.post(f"/skill-trees/{agent_id}/view/delete").status_code == 403
+    assert taro.post(f"/skill-trees/{agent_id}/view/delete").status_code == 200
+    assert tree_files(engine) == []
+    with Session(engine) as db:
+        assert db.exec(select(SkillTree)).one().content == "# T"
+
+
+def test_agents_set_the_user_friendly_version_after_the_ai_one(engine, client, taro, course, create_agent):
+    agent_id = create_agent(taro, course, "helper")
+    pdf = {"file": ("tree.pdf", b"%PDF-1.4 tree", "application/pdf")}
+    assert client.put("/api/skill-tree/view", files=pdf, headers=api("helper")).status_code == 409
+    client.put("/api/skill-tree", json={"content": "# Tree"}, headers=api("helper"))
+    made = client.put("/api/skill-tree/view", files=pdf, headers=api("helper")).json()
+    assert made["view"]["filename"] == "tree.pdf"
+    read = client.get(f"/api/skill-trees/{agent_id}", headers=api("helper")).json()
+    assert read["content"] == "# Tree" and read["view"]["content_type"] == "application/pdf"
+    assert client.get(f"/api/skill-trees/{agent_id}/view", headers=api("helper")).content == b"%PDF-1.4 tree"
+    # Deleting the whole tree deletes the file too.
+    assert client.delete("/api/skill-tree", headers=api("helper")).json() == {"deleted": 1}
+    assert tree_files(engine) == []
+
+
+def test_deleting_an_agent_deletes_its_tree_files(engine, client, taro, course, create_agent):
+    from conftest import PASSWORD
+
+    agent_id = create_agent(taro, course, "helper")
+    client.put("/api/skill-tree", json={"content": "# Tree"}, headers=api("helper"))
+    client.put("/api/skill-tree/view", files={"file": ("t.png", b"png", "image/png")}, headers=api("helper"))
+    taro.post(f"/agents/{agent_id}/delete", data={"password": PASSWORD})
+    assert tree_files(engine) == []
+
+
 def test_deleting_an_agent_keeps_its_skills_credited(engine, client, taro, course, create_agent):
     from conftest import PASSWORD
 
@@ -244,7 +401,7 @@ def test_keyword_rules_sort_skills_by_function(engine, admin, taro, course):
     reply = admin.post("/market/organize")
     assert "Organized 2 skills" in reply.text
     with Session(engine) as db:
-        names = {s.name: db.get(SkillCategory, s.category_id).name for s in db.exec(select(Skill)).all()}
+        names = {s.name: db.get(SkillCategory, s.category_id).name for s in skills(engine)}
         assert db.exec(select(OrganizerRun)).one().method == "rules"
     assert names == {"Finder": "Data retrieval", "Chooser": "Decision frameworks"}
     grouped_view = market_html(taro, course)
@@ -308,7 +465,7 @@ def test_a_bad_ai_answer_changes_nothing_and_the_daily_limit_holds(engine, taro,
     with Session(engine) as db:
         first = market.run(db, "manual")
         assert not first.ok and "no JSON" in first.message
-        assert db.exec(select(Skill)).one().category_id is None  # nothing changed
+        assert skills(engine)[0].category_id is None  # nothing changed
         market.run(db, "manual")
         third = market.run(db, "manual")
     assert len(calls) == 2  # at most two requests a day

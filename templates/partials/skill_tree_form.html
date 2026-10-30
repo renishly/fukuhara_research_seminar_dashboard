@@ -1,6 +1,8 @@
 {% extends "partials/modal.html" %}
 {# One of your agents' skill tree: the big picture of where each of its skills
-   (shared on the market or not) fits and is used in the agent. #}
+   (shared on the market or not) fits and is used in the agent. Two versions:
+   the AI version (.md, required the first time) and an optional
+   user-friendly version (PDF, HTML or image). #}
 {% import "partials/dropzone.html" as drop %}
 {% block body %}
 {% set v = values %}
@@ -11,21 +13,36 @@
 <div class="modal-action"><button type="button" class="btn" @click="$el.closest('.modal').remove()">Close</button></div>
 {% else %}
 <form class="space-y-3" hx-post="/classes/{{ course.id }}/skill-trees" hx-encoding="multipart/form-data"
-      hx-target="closest .modal" hx-swap="outerHTML" x-data="{ mode: '{{ v.mode }}' }">
+      hx-target="closest .modal" hx-swap="outerHTML"
+      x-data="{ mode: '{{ v.mode }}', agent: '{{ chosen_agent }}', withTree: {{ trees.keys() | list | tojson }} }">
   <h3 class="text-lg font-bold">Skill tree</h3>
   <p class="text-sm">Describe where each of the agent's skills fits and is used, including skills you haven't shared.
-    The market organizer reads it to understand the skills. Uploading again replaces it.</p>
+    A skill tree has two versions: the <strong>AI version</strong> (Markdown, required: the market organizer and
+    agents read it) and, if you like, a <strong>user-friendly version</strong> for people (a PDF, HTML page or
+    image), which is what members see first. Uploading again replaces a version.</p>
   {% if error %}<div role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>{% endif %}
   <fieldset class="fieldset">
     <legend class="fieldset-legend">Agent</legend>
-    <select name="agent_id" class="select w-full">{% for a in agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+    <select name="agent_id" class="select w-full" x-model="agent">
+      {% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id == chosen_agent }}>{{ a.name }}{{ " (has a skill tree)" if a.id in trees }}</option>{% endfor %}
+    </select>
   </fieldset>
-  <div class="join">
-    <input type="radio" name="mode" value="file" aria-label="File (.md)" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
-    <input type="radio" name="mode" value="text" aria-label="Type it" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
-  </div>
-  <div x-show="mode === 'file'">{{ drop.dropzone("file", multiple=false, accept=".md,.markdown,.txt,text/markdown,text/plain") }}</div>
-  <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="8" class="textarea w-full font-mono text-xs">{{ v.content_text }}</textarea>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">AI version (.md)
+      <span x-show="withTree.includes(Number(agent))" class="font-normal">&middot; optional: leave empty to keep the current one</span>
+      <span x-show="!withTree.includes(Number(agent))" class="font-normal">&middot; required</span></legend>
+    <div class="join">
+      <input type="radio" name="mode" value="file" aria-label="File (.md)" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'file' }}>
+      <input type="radio" name="mode" value="text" aria-label="Type it" class="join-item btn btn-sm" x-model="mode" {{ 'checked' if v.mode == 'text' }}>
+    </div>
+    <div x-show="mode === 'file'" class="mt-2">{{ drop.dropzone("file", multiple=false, accept=".md,.markdown,.txt,text/markdown,text/plain", label="AI version (.md)") }}</div>
+    <textarea x-show="mode === 'text'" x-cloak name="content_text" rows="8" class="textarea mt-2 w-full font-mono text-xs">{{ v.content_text }}</textarea>
+  </fieldset>
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">User-friendly version (optional)</legend>
+    {{ drop.dropzone("view", multiple=false, accept=view_accept, label="User-friendly version") }}
+    <p class="label whitespace-normal">PDF, HTML page or image (PNG, JPEG, GIF, WebP), up to 20 MB. HTML is shown sealed off, without scripts.</p>
+  </fieldset>
   <div class="modal-action">
     <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
     <button type="submit" class="btn btn-primary">Save skill tree</button>

@@ -1,13 +1,19 @@
 {% extends "partials/modal.html" %}
 {# One skill: who shared it, where it fits, its identifier and address (what
    to give an agent), its latest text, and its agent's skill tree. #}
+{% import "partials/tree_view.html" as tree_view %}
 {% block size %}max-w-3xl{% endblock %}
 {% block body %}
 <div class="space-y-4" x-data="{ deleting: false, showTree: false }">
   <div class="space-y-1">
     <h3 class="text-lg font-bold normal-case tracking-normal">{{ skill.name }}</h3>
+    {% if skill.builtin %}
+    <p class="text-sm"><span class="badge badge-secondary badge-sm">built in</span> Comes with the dashboard and is on every
+      class's market. It's rewritten whenever the dashboard is updated, so it always matches the dashboard as it is now.</p>
+    {% else %}
     <p class="text-sm">Shared {{ credit }} &middot; {{ "whole seminar" if skill.share == "seminar" else "this class only" }}
       ({{ course_name(course) if course else "a deleted class" }})</p>
+    {% endif %}
     <p class="text-xs text-base-content/70">Version {{ skill.version }} &middot; updated {{ skill.updated_at | jst }}
       &middot; {{ skill.downloads }} download{{ "s" if skill.downloads != 1 }}{% if category %} &middot; {{ category.name }}{% endif %}</p>
   </div>
@@ -21,12 +27,12 @@
     <p>With the connector: <code class="select-all">read_skill("{{ identifier }}")</code></p>
   </div>
 
-  <pre class="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ skill.content }}</pre>
+  <pre class="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ content }}</pre>
 
   {% if tree %}
   <div class="space-y-2">
     <button type="button" class="btn btn-sm" @click="showTree = !showTree" x-text="showTree ? 'Hide its agent\'s skill tree' : 'Show its agent\'s skill tree'">Show its agent's skill tree</button>
-    <pre x-show="showTree" x-cloak class="max-h-80 overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ tree.content }}</pre>
+    <template x-if="showTree">{{ tree_view.show(tree, view_file) }}</template>
   </div>
   {% endif %}
 

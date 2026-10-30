@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from fastapi import HTTPException
 from sqlmodel import Session, delete, select
 
+import market
 from db import (
     Agent,
     AgentFolder,
@@ -216,7 +217,9 @@ def delete_agent(db: Session, agent: Agent) -> None:
         db.delete(item)
         db.flush()
         delete_stored_file(db, file_id)
-    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter, SkillTree):
+    for tree in db.exec(select(SkillTree).where(SkillTree.agent_id == agent.id)).all():
+        market.delete_tree(db, tree)
+    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter):
         db.exec(delete(model).where(model.agent_id == agent.id))
     # Skills it shared stay on the market, still credited to it by name.
     for skill in db.exec(select(Skill).where(Skill.agent_id == agent.id)).all():

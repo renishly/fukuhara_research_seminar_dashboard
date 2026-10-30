@@ -408,12 +408,17 @@ class Skill(SQLModel, table=True):
     either way it is credited to the member, and also to the agent if an
     agent posted it. Its identifier is "skill-<id>" (see market.py), and
     reading it always gives the latest version.
+
+    Built-in skills (builtin set, e.g. "connector") come with the dashboard
+    itself: no class, no owner, always seminar-wide, rewritten at every start
+    (see market.sync_builtin_skills()), and nobody can edit or remove them.
     """
 
     id: int | None = Field(default=None, primary_key=True)
-    course_id: int = Field(foreign_key="course.id", index=True)  # the class it was posted in
+    course_id: int | None = Field(default=None, foreign_key="course.id", index=True)  # the class it was posted in
     share: str = "class"  # "class": that class only; "seminar": every class's market
-    owner_id: int = Field(foreign_key="user.id", index=True)  # the member it is credited to
+    owner_id: int | None = Field(default=None, foreign_key="user.id", index=True)  # the member it is credited to
+    builtin: str | None = Field(default=None, unique=True)  # e.g. "connector"; None for members' skills
     agent_id: int | None = Field(default=None, foreign_key="agent.id", index=True)  # set if an agent posted it
     agent_name: str | None = None  # kept for the credit line, even if the agent is renamed or deleted later
     name: str
@@ -432,7 +437,12 @@ class Skill(SQLModel, table=True):
 class SkillTree(SQLModel, table=True):
     """An agent's "skill tree": the big-picture description of where each of
     its skills (shared on the market or not) fits and is used in the agent.
-    One per agent; uploading again replaces it."""
+    One per agent; uploading again replaces it.
+
+    It has two versions: the AI version (content, Markdown text: required,
+    and the only one the organizer reads) and, optionally, a user-friendly
+    version (a PDF, HTML page or image in file storage), which is what people
+    are shown first."""
 
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int = Field(foreign_key="agent.id", unique=True)
@@ -440,7 +450,9 @@ class SkillTree(SQLModel, table=True):
     content: str = Field(sa_column=Column(Text, nullable=False))
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)  # the AI version's last change
+    view_file_id: int | None = Field(default=None, foreign_key="storedfile.id")
+    view_updated_at: datetime | None = None
 
 
 class OrganizerRun(SQLModel, table=True):
@@ -500,12 +512,16 @@ def create_db_and_tables(target_engine=None) -> None:
     """
     target_engine = target_engine or engine
     SQLModel.metadata.create_all(target_engine)
+    allow_empty_columns(target_engine)
     add_missing_columns(target_engine)
     enable_row_level_security(target_engine)
     with Session(target_engine) as session:
         seed_gens(session)
         move_legacy_monitors(session)
         move_legacy_attachments(session)
+        from market import sync_builtin_skills  # here, because market.py imports this file
+
+        sync_builtin_skills(session)
 
 
 def seed_gens(session: Session) -> None:
@@ -606,6 +622,42 @@ def _sql_literal(value) -> str | None:
     if isinstance(value, str):
         return "'" + value.replace("'", "''") + "'"
     return None
+
+
+# Columns that were required in older versions and may now be empty.
+NOW_OPTIONAL = {"skill": ("course_id", "owner_id")}  # built-in skills have neither
+
+
+def allow_empty_columns(target_engine=None) -> list[str]:
+    """Let NOW_OPTIONAL columns of an existing database be empty. Postgres can
+    change that in place; SQLite can't, so the table is rebuilt there (rows
+    copied into a fresh copy). Returns the columns it changed."""
+    target_engine = target_engine or engine
+    inspector = inspect(target_engine)
+    changed = []
+    for table_name, columns in NOW_OPTIONAL.items():
+        if not inspector.has_table(table_name):
+            continue
+        existing = inspector.get_columns(table_name)
+        strict = [c["name"] for c in existing if c["name"] in columns and not c["nullable"]]
+        if not strict:
+            continue
+        with target_engine.begin() as connection:
+            if target_engine.dialect.name == "postgresql":
+                for column in strict:
+                    connection.execute(text(f'ALTER TABLE "{table_name}" ALTER COLUMN "{column}" DROP NOT NULL'))
+            else:
+                names = ", ".join(f'"{c["name"]}"' for c in existing)
+                for index in inspector.get_indexes(table_name):
+                    connection.execute(text(f'DROP INDEX "{index["name"]}"'))
+                connection.execute(text(f'ALTER TABLE "{table_name}" RENAME TO "{table_name}_old"'))
+                SQLModel.metadata.tables[table_name].create(connection)
+                connection.execute(text(f'INSERT INTO "{table_name}" ({names}) SELECT {names} FROM "{table_name}_old"'))
+                connection.execute(text(f'DROP TABLE "{table_name}_old"'))
+        changed += [f"{table_name}.{column}" for column in strict]
+    if changed:
+        print(f"Database: these columns may now be empty: {', '.join(changed)}")
+    return changed
 
 
 def add_missing_columns(target_engine=None) -> list[str]:

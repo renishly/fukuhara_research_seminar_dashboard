@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, Form, Request
 from sqlmodel import Session, delete, select, update
 
+import market
 from db import (
     DATABASE_LIMIT,
     Agent,
@@ -166,7 +167,8 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
     db.exec(delete(Skill).where(Skill.owner_id == user.id))
     for agent in db.exec(select(Agent).where(Agent.owner_id == user.id)).all():
         delete_agent(db, agent)
-    db.exec(delete(SkillTree).where(SkillTree.owner_id == user.id))
+    for tree in db.exec(select(SkillTree).where(SkillTree.owner_id == user.id)).all():
+        market.delete_tree(db, tree)
     for model, column in ((Folder, Folder.owner_id), (NotifySetting, NotifySetting.user_id),
                           (MonitorNotifySetting, MonitorNotifySetting.user_id),
                           (FeedFilter, FeedFilter.user_id),

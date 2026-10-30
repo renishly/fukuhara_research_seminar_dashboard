@@ -766,10 +766,16 @@ def test_connector_shares_reads_and_trees_skills(engine, connector):
     connector.post_skill("# Paper finder\nSearch arXiv and PubMed.")  # same name: an update
     assert connector.read_skill(info["identifier"]) == "# Paper finder\nSearch arXiv and PubMed."
     assert connector.skill_details(info["id"])["version"] == 2
-    assert [s["identifier"] for s in connector.skills()] == [info["identifier"]]
+    assert [s["identifier"] for s in connector.skills()] == ["skill-connector", info["identifier"]]  # built-in first
     assert connector.download_skill(info["identifier"]).startswith("# Paper finder")
     assert connector.set_skill_tree("# Tree\n- Paper finder: step 1") is True
     agent_id = rows(engine, Agent)[0].id
     assert connector.read_skill_tree(agent_id)["content"].startswith("# Tree")
+    assert connector.read_skill_tree(agent_id)["view"] is None
+    assert connector.set_skill_tree_view(b"%PDF-1.4 tree", filename="tree.pdf") is True
+    view = connector.read_skill_tree(agent_id)["view"]
+    assert view["filename"] == "tree.pdf" and view["url"].endswith(f"/api/skill-trees/{agent_id}/view")
+    assert connector.remove_skill_tree_view() is True
+    assert connector.read_skill_tree(agent_id)["view"] is None
     assert connector.delete_skill(info["identifier"]) is True
     assert connector.read_skill(info["identifier"]) is None  # gone: a warning, not an error

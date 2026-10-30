@@ -7,10 +7,12 @@
     <span class="card-body gap-2 p-4">
       <span class="flex items-start gap-2">
         <strong class="min-w-0 flex-1 break-words">{{ skill.name }}</strong>
-        {% if skill.share == "seminar" %}<span class="badge badge-outline badge-xs shrink-0" title="Shared with the whole seminar">seminar</span>{% endif %}
+        {% if skill.builtin %}<span class="badge badge-secondary badge-xs shrink-0" title="Comes with the dashboard; always up to date">built in</span>
+        {% elif skill.share == "seminar" %}<span class="badge badge-outline badge-xs shrink-0" title="Shared with the whole seminar">seminar</span>{% endif %}
       </span>
       <span class="text-xs text-base-content/70">
-        {%- if skill.agent_name %}from {{ owners.get(skill.owner_id, "a deleted account") }}'s agent, {{ skill.agent_name }}
+        {%- if skill.builtin %}Built into the dashboard
+        {%- elif skill.agent_name %}from {{ owners.get(skill.owner_id, "a deleted account") }}'s agent, {{ skill.agent_name }}
         {%- else %}{{ owners.get(skill.owner_id, "a deleted account") }}{% endif %}</span>
       {% if skill.summary %}<span class="line-clamp-2 text-sm">{{ skill.summary }}</span>{% endif %}
       {% if skill.specialty %}<span class="line-clamp-2 text-xs italic text-base-content/80">{{ skill.specialty }}</span>{% endif %}
@@ -45,9 +47,15 @@
   {% for group in groups %}
   <section class="space-y-3">
     <div class="border-l-4 border-secondary bg-white/50 p-3">
+      {% if group.builtin %}
+      <p class="font-semibold">Built into the dashboard</p>
+      <p class="text-sm">Come with the dashboard, on every class's market, and always match the dashboard as it is now.
+        Give one to your agent by its identifier.</p>
+      {% else %}
       <p class="font-semibold">{{ group.category.name if group.category else "Not organized yet" }}
         <span class="text-xs font-normal text-base-content/70">({{ group.skills | length }})</span></p>
       <p class="text-sm">{{ group.category.description if group.category else "New or updated skills wait here until the market organizer sorts them (daily at 15:00 JST)." }}</p>
+      {% endif %}
     </div>
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{% for skill in group.skills %}{{ card(skill) }}{% endfor %}</div>
   </section>

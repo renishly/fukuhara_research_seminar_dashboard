@@ -1333,8 +1333,39 @@ def set_skill_tree(content) -> bool:
         return False
 
 
+def set_skill_tree_view(content, filename: str | None = None) -> bool:
+    """Set this agent's user-friendly skill tree, the version people see first:
+    a PDF, HTML page or image (PNG, JPEG, GIF, WebP), up to 20 MB. content: a
+    pathlib.Path, an open file, or bytes (then give filename, e.g. "tree.pdf").
+    The AI version (set_skill_tree) must be set first; it stays what agents
+    and the market organizer read."""
+    if PROBLEM:
+        return False
+    try:
+        if isinstance(content, str):  # a path given as text
+            with open(content, "rb") as handle:
+                name, data = os.path.basename(content), handle.read()
+        else:
+            name, data = _read_file(content)
+    except OSError as error:
+        print(f"[dashboard] Couldn't read the skill tree file: {error}")
+        return False
+    try:
+        _send("PUT", "/api/skill-tree/view", UPLOAD_TIMEOUT_SECONDS, files={"file": (filename or name, data)})
+        return True
+    except requests.RequestException as error:
+        _warn("set the user-friendly skill tree", error)
+        return False
+
+
+def remove_skill_tree_view() -> bool:
+    """Remove this agent's user-friendly skill tree (the AI version stays)."""
+    return _delete("/api/skill-tree/view", "remove the user-friendly skill tree") is not None
+
+
 def read_skill_tree(agent_id) -> dict | None:
-    """An agent's skill tree (its id, e.g. a skill's "agent_id"): {"agent", "version", "content", ...}."""
+    """An agent's skill tree (its id, e.g. a skill's "agent_id"): {"agent", "version",
+    "content" (the AI version), "view" (the user-friendly file's details, or None), ...}."""
     return _read(f"/api/skill-trees/{int(agent_id)}", f"read the skill tree of agent {agent_id}")
 
 

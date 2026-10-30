@@ -1,0 +1,26 @@
+{# A skill tree as people see it: the user-friendly version (a PDF, HTML page
+   or image) if there is one, with the AI version (.md) behind a button;
+   otherwise the AI version. HTML is shown the same sealed-off way as other
+   previews (see preview.html). #}
+{% macro show(tree, view_file) %}
+<div x-data="{ ai: {{ 'false' if view_file else 'true' }} }" class="space-y-2">
+  {% if view_file %}
+  {% set kind = tree_view_kind(view_file) %}
+  <div x-show="!ai" class="space-y-1">
+    {% if kind == "image" %}
+    <a href="/files/{{ view_file.id }}" target="_blank" class="block w-fit">
+      <img src="/files/{{ view_file.id }}" alt="{{ view_file.filename }}" class="max-h-[60vh] max-w-full border border-base-content/40 bg-white">
+    </a>
+    {% else %}
+    <iframe src="/files/{{ view_file.id }}/preview{{ '#view=FitH' if kind == 'pdf' }}" title="{{ view_file.filename }}"
+            class="h-[60vh] min-h-80 w-full border border-base-content/40 bg-white"></iframe>
+    {% endif %}
+    <p class="text-xs">&#128206; <a href="/files/{{ view_file.id }}" class="link break-all">{{ view_file.filename }}</a>
+      <span class="text-base-content/60">({{ view_file.size | human_size }})</span></p>
+  </div>
+  <button type="button" class="btn btn-xs" @click="ai = !ai"
+          x-text="ai ? 'Show the user-friendly version' : 'Show the AI version (.md)'">Show the AI version (.md)</button>
+  {% endif %}
+  <pre x-show="ai" {{ 'x-cloak' if view_file }} class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words border border-base-content/30 bg-white/70 p-3 font-sans text-sm">{{ tree.content }}</pre>
+</div>
+{% endmacro %}

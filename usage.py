@@ -16,7 +16,21 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 from sqlmodel import Session, func, select
 
-from db import Agent, Attachment, Course, Event, InboxFile, Monitor, Output, StoredFile, Submission, Task, User, database_size
+from db import (
+    Agent,
+    Attachment,
+    Course,
+    Event,
+    InboxFile,
+    Monitor,
+    Output,
+    SkillTree,
+    StoredFile,
+    Submission,
+    Task,
+    User,
+    database_size,
+)
 from permissions import course_name
 
 # Pie slice colours, always used in this order (checked for colour-blind
@@ -165,6 +179,9 @@ def file_breakdown(db: Session) -> list[View]:
     for item in db.exec(select(InboxFile)).all():
         agent = agents.get(item.agent_id)
         owners[item.file_id] = ("Inbox files (waiting)", agent and agent.course_id, agent and agent.owner_id, item.agent_id)
+    for tree in db.exec(select(SkillTree).where(SkillTree.view_file_id.is_not(None))).all():
+        agent = agents.get(tree.agent_id)
+        owners[tree.view_file_id] = ("Skill tree files", agent and agent.course_id, tree.owner_id, tree.agent_id)
 
     by_type, by_class, by_person, by_agent = {}, {}, {}, {}
     for file_id, stored in files.items():

@@ -28,14 +28,17 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
+from fastapi import UploadFile
 from sqlmodel import Session, func, or_, select
 
-from db import Agent, Course, OrganizerRun, Skill, SkillCategory, SkillTree, User, as_utc, utc_now
-from permissions import can_view_course, course_name
+from db import Agent, Course, OrganizerRun, Skill, SkillCategory, SkillTree, StoredFile, User, as_utc, utc_now
+from permissions import can_see_tree, can_view_course, course_name
 from security import Viewer
-from web import JST
+from uploads import UploadRefused, delete_stored_file, save_upload
+from web import JST, templates
 
 MAX_SKILL_BYTES = 100 * 1024  # a skill or skill tree file: up to 100 KB of text
 MAX_SKILL_NAME = 100
@@ -48,23 +51,43 @@ SORTS = {"category": "By category", "updated": "Recently updated", "downloads": 
 
 
 def identifier(skill: Skill) -> str:
-    """e.g. "skill-42": what to give an agent (read_skill("skill-42") in the connector)."""
-    return f"skill-{skill.id}"
+    """e.g. "skill-42": what to give an agent (read_skill("skill-42") in the connector).
+    Built-in skills have a name instead of a number ("skill-connector"), the
+    same on every copy of the dashboard."""
+    return f"skill-{skill.builtin or skill.id}"
 
 
 def address(skill: Skill, site: str = "") -> str:
     """The address an agent reads the latest version from (with its API key)."""
-    return f"{site}/api/skills/{skill.id}/content"
+    return f"{site}/api/skills/{skill.builtin or skill.id}/content"
 
 
-def parse_ref(ref: str) -> int | None:
-    """ "skill-42" or "42" -> 42 (None if it isn't either)."""
-    match = re.fullmatch(r"(?:skill-)?(\d+)", ref.strip())
-    return int(match.group(1)) if match else None
+def parse_ref(ref: str) -> int | str | None:
+    """ "skill-42" or "42" -> 42; "skill-connector" or "connector" -> "connector"
+    (a built-in skill); None if it isn't any of these."""
+    match = re.fullmatch(r"(?:skill-)?(\d+|[a-z][a-z-]*)", ref.strip())
+    if not match:
+        return None
+    return int(match.group(1)) if match.group(1).isdigit() else match.group(1)
+
+
+def find_skill(db: Session, ref: str) -> Skill | None:
+    """A skill by any of its references (see parse_ref()), visible or not."""
+    key = parse_ref(ref)
+    if isinstance(key, int):
+        return db.get(Skill, key)
+    return db.exec(select(Skill).where(Skill.builtin == key)).first() if key else None
+
+
+def skill_text(skill: Skill, site: str = "") -> str:
+    """The skill's text as served: built-in skills get this site's address filled in."""
+    return skill.content.replace("{{DOWNLOADED_FROM}}", site) if skill.builtin else skill.content
 
 
 def credit(skill: Skill, owner: User | None) -> str:
     """ "Yamada Taro", or "from Yamada Taro's agent, Researcher" if an agent posted it."""
+    if skill.builtin:
+        return BUILT_IN_CREDIT
     who = owner.full_name if owner else "a deleted account"
     if skill.agent_name:
         return f"from {who}'s agent, {skill.agent_name}"
@@ -86,13 +109,14 @@ def can_see_skill(db: Session, viewer: Viewer, skill: Skill) -> bool:
 
 
 def can_change_skill(viewer: Viewer, skill: Skill) -> bool:
-    """The member it's credited to (also for skills their agents posted)."""
-    return viewer.is_member and viewer.id == skill.owner_id
+    """The member it's credited to (also for skills their agents posted).
+    Built-in skills: nobody (they change with the dashboard)."""
+    return not skill.builtin and viewer.is_member and viewer.id == skill.owner_id
 
 
 def can_delete_skill(viewer: Viewer, skill: Skill) -> bool:
-    """Its member, or an admin (moderation)."""
-    return can_change_skill(viewer, skill) or viewer.is_admin
+    """Its member, or an admin (moderation). Built-in skills: nobody."""
+    return not skill.builtin and (can_change_skill(viewer, skill) or viewer.is_admin)
 
 
 def viewer_for(db: Session, user: User) -> Viewer:
@@ -120,11 +144,12 @@ def listed_skills(db: Session, viewer: Viewer, course: Course, query: MarketQuer
         # Seminar-wide skills from every class, plus this class's own.
         statement = statement.where(or_(Skill.share == "seminar", Skill.course_id == course.id))
     else:
-        statement = statement.where(Skill.course_id == course.id)
+        # This class's own, and the built-in skills (in every class's market).
+        statement = statement.where(or_(Skill.course_id == course.id, Skill.builtin.is_not(None)))
     if query.source == "agent":
         statement = statement.where(Skill.agent_name.is_not(None))
     elif query.source == "member":
-        statement = statement.where(Skill.agent_name.is_(None))
+        statement = statement.where(Skill.agent_name.is_(None), Skill.builtin.is_(None))
     if query.mine:
         statement = statement.where(Skill.owner_id == viewer.id)
     if query.category == "none":
@@ -137,7 +162,7 @@ def listed_skills(db: Session, viewer: Viewer, course: Course, query: MarketQuer
         owners = owner_names(db, skills)
         def haystack(s: Skill) -> str:
             return " ".join([s.name, s.summary or "", s.specialty or "", s.agent_name or "",
-                             owners.get(s.owner_id, ""), identifier(s)]).casefold()
+                             owners.get(s.owner_id, ""), credit(s, None) if s.builtin else "", identifier(s)]).casefold()
         skills = [s for s in skills if all(word in haystack(s) for word in words)]
     keys = {
         "updated": lambda s: (-as_utc(s.updated_at).timestamp(),),
@@ -146,7 +171,8 @@ def listed_skills(db: Session, viewer: Viewer, course: Course, query: MarketQuer
         "name": lambda s: (s.name.casefold(),),
         "category": lambda s: (-as_utc(s.updated_at).timestamp(),),  # grouped later; newest first inside
     }
-    return sorted(skills, key=keys.get(query.sort, keys["category"]))
+    key = keys.get(query.sort, keys["category"])
+    return sorted(skills, key=lambda s: (s.builtin is None, *key(s)))  # built-in skills first
 
 
 def owner_names(db: Session, skills: list[Skill]) -> dict[int, str]:
@@ -161,14 +187,18 @@ def categories(db: Session) -> list[SkillCategory]:
 
 
 def grouped(db: Session, skills: list[Skill]) -> list[dict]:
-    """Skills grouped by category, each group with its category (None for
-    skills the organizer hasn't looked at yet, listed last)."""
-    groups = []
+    """Skills grouped by category, each group with its category: built-in
+    skills first (builtin: True), and None for skills the organizer hasn't
+    looked at yet, listed last."""
+    built_in = [s for s in skills if s.builtin]
+    groups = [{"category": None, "builtin": True, "skills": built_in}] if built_in else []
+    skills = [s for s in skills if not s.builtin]
     for category in categories(db):
         members = [s for s in skills if s.category_id == category.id]
         if members:
             groups.append({"category": category, "skills": members})
-    rest = [s for s in skills if s.category_id is None or not any(g["category"].id == s.category_id for g in groups)]
+    rest = [s for s in skills if s.category_id is None
+            or not any(g["category"] and g["category"].id == s.category_id for g in groups)]
     if rest:
         groups.append({"category": None, "skills": rest})
     return groups
@@ -177,17 +207,9 @@ def grouped(db: Session, skills: list[Skill]) -> list[dict]:
 def visible_tree(db: Session, viewer: Viewer, agent_id: int | None) -> SkillTree | None:
     """An agent's skill tree, if there is one and this member can see that agent's class
     (or the agent has shared a skill with the whole seminar)."""
-    if agent_id is None or not viewer.is_member:
+    if not can_see_tree(db, viewer, agent_id):
         return None
-    tree = db.exec(select(SkillTree).where(SkillTree.agent_id == agent_id)).first()
-    agent = db.get(Agent, agent_id)
-    if tree is None or agent is None:
-        return None
-    course = db.get(Course, agent.course_id)
-    shared = db.exec(select(Skill).where(Skill.agent_id == agent_id, Skill.share == "seminar")).first()
-    if shared is not None or (course is not None and can_view_course(db, viewer, course)):
-        return tree
-    return None
+    return db.exec(select(SkillTree).where(SkillTree.agent_id == agent_id)).first()
 
 
 # --- Posting and updating ---------------------------------------------------------------------
@@ -253,6 +275,25 @@ def save_skill(db: Session, *, course: Course, owner: User, content: str, name: 
     return skill, created
 
 
+# The user-friendly version of a skill tree: a PDF, an HTML page or an image.
+VIEW_FILE_LIMIT = 20 * 1024 * 1024  # bigger files couldn't be previewed in the page
+VIEW_TYPES = {".pdf": "application/pdf", ".html": "text/html", ".htm": "text/html", ".png": "image/png",
+              ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+VIEW_ACCEPT = ",".join(VIEW_TYPES)  # for the file chooser
+
+
+def view_kind(stored: StoredFile | None) -> str | None:
+    """How a skill tree's user-friendly version is shown: "pdf", "html", "image" or None."""
+    if stored is None:
+        return None
+    if stored.content_type.startswith("image/"):
+        return "image"
+    return "pdf" if stored.content_type == "application/pdf" else "html"
+
+
+templates.env.globals["tree_view_kind"] = view_kind
+
+
 def save_tree(db: Session, agent: Agent, content: str) -> SkillTree:
     """Set (or replace) an agent's skill tree. Commits."""
     tree = db.exec(select(SkillTree).where(SkillTree.agent_id == agent.id)).first()
@@ -267,11 +308,105 @@ def save_tree(db: Session, agent: Agent, content: str) -> SkillTree:
     return tree
 
 
+# --- Built-in skills -------------------------------------------------------------------------
+
+BUILT_IN_CREDIT = "built into the dashboard"
+CONNECTOR_PROMPT = Path(__file__).resolve().parent / "connector" / "connector_prompt.md"
+CONNECTOR_PREFACE = """# Dashboard connector (built-in skill)
+
+This skill comes with the dashboard itself and always describes how to connect
+to it **as it is now**: it is rebuilt from the dashboard's own connector
+instructions every time the dashboard is updated. Its identifier never changes:
+`skill-connector` (address: `{{DOWNLOADED_FROM}}/api/skills/connector/content`,
+read with this agent's API key in the `X-API-Key` header).
+
+- Read it when setting up the connection, and read it again whenever a call to
+  the dashboard starts failing in a new way (for example 404, 405 or 422), or
+  when its version (`X-Skill-Version`) is higher than the one you last used.
+  Then update the connection code to match, keeping what already works.
+- Never put the API key into code, logs or anything you share.
+
+---
+
+"""
+
+
+def builtin_skills() -> dict[str, dict]:
+    """What each built-in skill should be now: {key: {name, summary, content}}."""
+    return {
+        "connector": {
+            "name": "Dashboard connector",
+            "summary": "How an agent connects to this dashboard: outputs, monitors, status, commands, the Inbox "
+                       "and skills. Always up to date with the dashboard.",
+            "content": CONNECTOR_PREFACE + CONNECTOR_PROMPT.read_text(encoding="utf-8"),
+        },
+    }
+
+
+def sync_builtin_skills(db: Session) -> None:
+    """Make sure every built-in skill exists, seminar-wide, with its current text
+    (its version goes up when the text changed). Runs at every start. Commits."""
+    for key, wanted in builtin_skills().items():
+        skill = db.exec(select(Skill).where(Skill.builtin == key)).first()
+        if skill is None:
+            skill = Skill(builtin=key, name=wanted["name"], content=wanted["content"])
+        elif skill.content != wanted["content"]:
+            skill.content, skill.version, skill.updated_at = wanted["content"], skill.version + 1, utc_now()
+        skill.name, skill.summary, skill.share = wanted["name"], wanted["summary"], "seminar"
+        skill.course_id = skill.owner_id = skill.agent_id = skill.agent_name = None
+        db.add(skill)
+    db.commit()
+
+
+def save_tree_view(db: Session, tree: SkillTree, upload: UploadFile, uploaded_by: int | None) -> StoredFile:
+    """Set (or replace) a skill tree's user-friendly version. Commits.
+    Raises SkillRefused for a file type that isn't allowed, or a fake PDF."""
+    name = (upload.filename or "").lower()
+    extension = name[name.rfind("."):] if "." in name else ""
+    if extension not in VIEW_TYPES:
+        raise SkillRefused("The user-friendly version must be a PDF, an HTML page or an image (PNG, JPEG, GIF, WebP).")
+    if extension == ".pdf" and not upload.file.read(5).startswith(b"%PDF-"):
+        raise SkillRefused("That file isn't a real PDF.")
+    upload.file.seek(0)
+    try:
+        stored = save_upload(db, upload, VIEW_FILE_LIMIT, uploaded_by)
+    except UploadRefused as refusal:
+        raise SkillRefused(str(refusal)) from refusal
+    stored.content_type = VIEW_TYPES[extension]  # by its name, not what the browser claimed
+    old_file_id, tree.view_file_id = tree.view_file_id, stored.id
+    tree.view_updated_at = utc_now()
+    db.add(tree)
+    db.flush()
+    delete_stored_file(db, old_file_id)
+    db.commit()
+    return stored
+
+
+def remove_tree_view(db: Session, tree: SkillTree) -> None:
+    """Remove a skill tree's user-friendly version (the AI version stays). The caller commits."""
+    old_file_id, tree.view_file_id, tree.view_updated_at = tree.view_file_id, None, None
+    db.add(tree)
+    db.flush()
+    delete_stored_file(db, old_file_id)
+
+
+def delete_tree(db: Session, tree: SkillTree) -> None:
+    """Delete a skill tree with its user-friendly version. The caller commits."""
+    file_id = tree.view_file_id
+    db.delete(tree)
+    db.flush()
+    delete_stored_file(db, file_id)
+
+
+def tree_view_file(db: Session, tree: SkillTree | None) -> StoredFile | None:
+    return db.get(StoredFile, tree.view_file_id) if tree is not None and tree.view_file_id else None
+
+
 def skill_info(db: Session, skill: Skill, site: str = "", with_content: bool = False) -> dict:
     """A skill as JSON for the agent API (never anyone's Login ID)."""
-    owner = db.get(User, skill.owner_id)
+    owner = db.get(User, skill.owner_id) if skill.owner_id else None
     category = db.get(SkillCategory, skill.category_id) if skill.category_id else None
-    course = db.get(Course, skill.course_id)
+    course = db.get(Course, skill.course_id) if skill.course_id else None
     info = {
         "id": skill.id, "identifier": identifier(skill), "address": address(skill, site), "name": skill.name,
         "summary": skill.summary, "credit": credit(skill, owner),
@@ -283,7 +418,9 @@ def skill_info(db: Session, skill: Skill, site: str = "", with_content: bool = F
         "skill_tree": f"{site}/api/skill-trees/{skill.agent_id}" if skill.agent_id else None,
     }
     if with_content:
-        info["content"] = skill.content
+        info["content"] = skill_text(skill, site)
+    if skill.builtin:
+        info["builtin"] = True
     return info
 
 
@@ -344,11 +481,12 @@ def last_run(db: Session) -> OrganizerRun | None:
 
 def changed_since(db: Session, moment: datetime | None) -> bool:
     """Has any skill or skill tree been posted or changed since `moment`?"""
+    members = Skill.builtin.is_(None)  # built-in skills aren't organized
     if moment is None:
-        return db.exec(select(func.count(Skill.id))).one() > 0
-    newer_skill = db.exec(select(Skill.id).where(Skill.updated_at > moment)).first()
+        return db.exec(select(func.count(Skill.id)).where(members)).one() > 0
+    newer_skill = db.exec(select(Skill.id).where(members, Skill.updated_at > moment)).first()
     newer_tree = db.exec(select(SkillTree.id).where(SkillTree.updated_at > moment)).first()
-    unorganized = db.exec(select(Skill.id).where(Skill.category_id.is_(None))).first()
+    unorganized = db.exec(select(Skill.id).where(members, Skill.category_id.is_(None))).first()
     return bool(newer_skill or newer_tree or unorganized)
 
 
@@ -401,7 +539,8 @@ def run(db: Session, trigger: str) -> OrganizerRun:
         db.commit()
         try:
             count = organize_with_ai(db) if method == "ai" else organize_with_rules(db)
-            record.ok, record.message = True, f"Organized {count} skills."
+            how = "with the AI model" if method == "ai" else "with keyword rules (no OPENROUTER_API_KEY set)"
+            record.ok, record.message = True, f"Organized {count} skills {how}."
         except Exception as error:  # noqa: BLE001 - any problem is reported, and the old categories stay
             db.rollback()
             record.message = f"Failed: {error}"[:500]
@@ -435,7 +574,7 @@ def organize_with_rules(db: Session) -> int:
         lookup[name] = upsert_category(db, name, description, position)
     keywords = {name: set(words.split()) for name, _, words in RULES}
     trees = {t.agent_id: t.content for t in db.exec(select(SkillTree)).all()}
-    skills = list(db.exec(select(Skill)).all())
+    skills = list(db.exec(select(Skill).where(Skill.builtin.is_(None))).all())
     for skill in skills:
         text = " ".join([skill.name, skill.summary or "", skill.content[:4000], trees.get(skill.agent_id, "")[:1000]])
         words = _words(text)
@@ -478,7 +617,7 @@ def remove_unused_categories(db: Session, keep_ids: set[int]) -> None:
 def build_prompt(db: Session) -> tuple[str, list[Skill]]:
     """The request to the model: the current categories, every skill (shortened
     to fit PROMPT_BUDGET), and the skill trees that place them."""
-    skills = list(db.exec(select(Skill).order_by(Skill.id)).all())
+    skills = list(db.exec(select(Skill).where(Skill.builtin.is_(None)).order_by(Skill.id)).all())
     trees = {t.agent_id: t.content for t in db.exec(select(SkillTree)).all()}
     per_skill = max(400, min(2000, PROMPT_BUDGET // max(1, len(skills))))
     existing = [{"name": c.name, "description": c.description} for c in categories(db)] or \

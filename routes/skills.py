@@ -15,7 +15,7 @@ from db import Agent, Course, Skill, SkillCategory, SkillTree, User, get_session
 from routes.agents import site_url
 from routes.common import get_course, not_found
 from security import Viewer, checked_admin, checked_member, forbidden, require_member, secret_matches
-from uploads import chosen_files
+from uploads import chosen_files, has_file
 from web import hx_redirect, render, toast
 
 router = APIRouter()
@@ -81,23 +81,26 @@ def skill_page(request: Request, skill_id: int, viewer: Viewer = Depends(require
                db: Session = Depends(get_session)):
     """A skill's details in a pop-up: its text, identifier, address and skill tree."""
     skill = get_skill(db, viewer, skill_id)
-    owner = db.get(User, skill.owner_id)
+    owner = db.get(User, skill.owner_id) if skill.owner_id else None
     category = db.get(SkillCategory, skill.category_id) if skill.category_id else None
-    course = db.get(Course, skill.course_id)
+    course = db.get(Course, skill.course_id) if skill.course_id else None
+    tree = market.visible_tree(db, viewer, skill.agent_id)
     return render(request, db, viewer, "partials/skill_detail.html", skill=skill, owner=owner, category=category,
                   course=course, credit=market.credit(skill, owner), identifier=market.identifier(skill),
-                  address=market.address(skill, site_url(request)), tree=market.visible_tree(db, viewer, skill.agent_id),
+                  address=market.address(skill, site_url(request)), tree=tree,
+                  content=market.skill_text(skill, site_url(request)), view_file=market.tree_view_file(db, tree),
                   can_change=market.can_change_skill(viewer, skill), can_delete=market.can_delete_skill(viewer, skill))
 
 
 @router.get("/skills/{skill_id}/download")
-def download_skill(skill_id: int, viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
+def download_skill(skill_id: int, request: Request, viewer: Viewer = Depends(require_member),
+                   db: Session = Depends(get_session)):
     skill = get_skill(db, viewer, skill_id)
     skill.downloads += 1
     db.add(skill)
     db.commit()
-    return Response(skill.content, media_type="text/markdown; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="skill-{skill.id}.md"',
+    return Response(market.skill_text(skill, site_url(request)), media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{market.identifier(skill)}.md"',
                              "X-Content-Type-Options": "nosniff"})
 
 
@@ -201,53 +204,91 @@ def remove_skill(skill_id: int, viewer: Viewer = Depends(checked_member), db: Se
 # --- Skill trees ----------------------------------------------------------------------------------------
 
 
+def tree_form(request, db, viewer, course, agent_id=None, values=None, error=None, status_code=200):
+    """The skill tree form. trees: which of the viewer's agents already have one
+    (for them the AI version is optional, to add or replace just the user-friendly one)."""
+    agents = my_agents(db, viewer, course)
+    trees = {t.agent_id: t for t in db.exec(select(SkillTree).where(
+        SkillTree.agent_id.in_([a.id for a in agents] or [-1]))).all()}
+    return render(request, db, viewer, "partials/skill_tree_form.html", status_code=status_code, course=course,
+                  agents=agents, trees=trees, chosen_agent=agent_id or (agents[0].id if agents else None),
+                  error=error, values=values or {"mode": "file", "content_text": ""}, view_accept=market.VIEW_ACCEPT)
+
+
 @router.get("/classes/{course_id}/skill-trees/new")
-def new_tree_form(request: Request, course_id: int, viewer: Viewer = Depends(require_member),
-                  db: Session = Depends(get_session)):
-    course = market_course(db, viewer, course_id)
-    return render(request, db, viewer, "partials/skill_tree_form.html", course=course,
-                  agents=my_agents(db, viewer, course), error=None, values={"mode": "file", "content_text": ""})
+def new_tree_form(request: Request, course_id: int, agent: int | None = None,
+                  viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
+    return tree_form(request, db, viewer, market_course(db, viewer, course_id), agent_id=agent)
 
 
 @router.post("/classes/{course_id}/skill-trees")
 async def upload_tree(request: Request, course_id: int, agent_id: int = Form(0), mode: str = Form("file"),
                       content_text: str = Form(""), file: UploadFile | None = File(None),
+                      view: UploadFile | None = File(None),
                       viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
-    """Set (or replace) the skill tree of one of your agents in this class."""
+    """Set (or replace) the skill tree of one of your agents in this class: the
+    AI version (.md, required the first time) and/or the user-friendly version."""
     course = market_course(db, viewer, course_id)
     agent = db.get(Agent, agent_id)
     if agent is None or agent.owner_id != viewer.id or agent.course_id != course.id:
         raise forbidden("Choose one of your own agents in this class.")
+    tree = db.exec(select(SkillTree).where(SkillTree.agent_id == agent.id)).first()
+    has_text = (mode == "file" and has_file(file)) or (mode == "text" and content_text.strip())
+    has_view = has_file(view)
     try:
-        content = await read_text_input(mode, content_text, file)
+        if tree is None and not has_text:
+            raise market.SkillRefused("The AI version (.md) comes first: the organizer reads it. "
+                                      "Add the user-friendly version with it, or later.")
+        if not has_text and not has_view:
+            raise market.SkillRefused("Choose a new AI version, a user-friendly version, or both.")
+        content = await read_text_input(mode, content_text, file) if has_text else None
+        if content is not None:
+            tree = market.save_tree(db, agent, content)
+        if has_view:
+            market.save_tree_view(db, tree, view, viewer.id)
     except market.SkillRefused as refusal:
-        return render(request, db, viewer, "partials/skill_tree_form.html", status_code=400, course=course,
-                      agents=my_agents(db, viewer, course), error=str(refusal),
-                      values={"mode": mode, "content_text": content_text})
-    market.save_tree(db, agent, content)
+        return tree_form(request, db, viewer, course, agent_id=agent.id, error=str(refusal), status_code=400,
+                         values={"mode": mode, "content_text": content_text})
     return hx_redirect(f"/classes/{course.id}?tab=agents")
 
 
 @router.get("/skill-trees/{agent_id}")
 def tree_page(request: Request, agent_id: int, viewer: Viewer = Depends(require_member),
               db: Session = Depends(get_session)):
+    """A skill tree: its user-friendly version first, if it has one; the AI version behind a button."""
     tree = market.visible_tree(db, viewer, agent_id)
     if tree is None:
         raise not_found("Skill tree not found")
     agent = db.get(Agent, agent_id)
     return render(request, db, viewer, "partials/skill_tree_detail.html", tree=tree, agent=agent,
-                  owner=db.get(User, tree.owner_id), can_delete=viewer.id == tree.owner_id or viewer.is_admin)
+                  owner=db.get(User, tree.owner_id), view_file=market.tree_view_file(db, tree),
+                  is_owner=viewer.id == tree.owner_id, can_delete=viewer.id == tree.owner_id or viewer.is_admin)
 
 
-@router.post("/skill-trees/{agent_id}/delete")
-def remove_tree(agent_id: int, viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
+def owned_tree(db: Session, viewer: Viewer, agent_id: int) -> SkillTree:
     tree = db.exec(select(SkillTree).where(SkillTree.agent_id == agent_id)).first()
     if tree is None:
         raise not_found("Skill tree not found")
     if viewer.id != tree.owner_id and not viewer.is_admin:
         raise forbidden("Only the agent's owner (or an admin) can remove its skill tree.")
+    return tree
+
+
+@router.post("/skill-trees/{agent_id}/delete")
+def remove_tree(agent_id: int, viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
+    tree = owned_tree(db, viewer, agent_id)
     course_id = db.get(Agent, agent_id).course_id
-    db.delete(tree)
+    market.delete_tree(db, tree)
+    db.commit()
+    return hx_redirect(f"/classes/{course_id}?tab=agents")
+
+
+@router.post("/skill-trees/{agent_id}/view/delete")
+def remove_tree_view(agent_id: int, viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
+    """Remove just the user-friendly version (the AI version stays)."""
+    tree = owned_tree(db, viewer, agent_id)
+    course_id = db.get(Agent, agent_id).course_id
+    market.remove_tree_view(db, tree)
     db.commit()
     return hx_redirect(f"/classes/{course_id}?tab=agents")
 
