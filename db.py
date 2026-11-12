@@ -282,6 +282,34 @@ class CheckInSpan(SQLModel, table=True):
     ended_at: datetime = Field(index=True)
 
 
+class Alumnus(SQLModel, table=True):
+    """An OB/OG (a graduate of the seminar) who agreed to be contacted for
+    visits (Kenichi). Seminar-wide; members only (see routes/alumni.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    year: str = ""  # their graduating year or gen, e.g. "2022" or "Gen 5"
+    company: str = ""
+    industry: str = ""
+    email: str = ""
+    phone: str = ""
+    prefers: str = "either"  # "email", "phone" or "either"
+    notes: str = ""
+    consent: bool = False  # ticked by whoever added them: they agreed to be listed
+    added_by: int | None = Field(default=None, foreign_key="user.id")
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class AlumnusContact(SQLModel, table=True):
+    """A member asking an OB/OG for a visit, logged so nobody messages them twice."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    alumnus_id: int = Field(foreign_key="alumnus.id", index=True)
+    member_id: int | None = Field(default=None, foreign_key="user.id")
+    at: datetime = Field(default_factory=utc_now)
+
+
 class StateChange(SQLModel, table=True):
     """One row of the live feed: an agent changed state (went offline, came
     back, needs attention, recovered, paused...) or brought new data. Only

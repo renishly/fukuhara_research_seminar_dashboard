@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
+{% block title %}OB/OG visits{% endblock %}
+{% block content %}
+{# The OB/OG directory (routes/alumni.py): graduates who agreed to be
+   contacted, with a log of visit requests so nobody is messaged twice.
+   Members only. Plain forms; Alpine opens the add / edit / delete parts. #}
+{% macro fields(v) %}
+<div class="grid gap-3 md:grid-cols-3">
+  <label class="fieldset"><span class="fieldset-legend">Name *</span>
+    <input type="text" name="name" value="{{ v.name or '' }}" required maxlength="100" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Graduated (year or gen)</span>
+    <input type="text" name="year" value="{{ v.year or '' }}" maxlength="20" placeholder="e.g. 2022 or Gen 5" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Company</span>
+    <input type="text" name="company" value="{{ v.company or '' }}" maxlength="100" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Industry</span>
+    <input type="text" name="industry" value="{{ v.industry or '' }}" maxlength="60" list="industries" placeholder="e.g. Finance" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Email</span>
+    <input type="email" name="email" value="{{ v.email or '' }}" maxlength="200" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Phone</span>
+    <input type="tel" name="phone" value="{{ v.phone or '' }}" maxlength="20" class="input input-sm w-full"></label>
+  <label class="fieldset"><span class="fieldset-legend">Prefers to be contacted by</span>
+    <select name="prefers" class="select select-sm w-full">
+      {% for key, label in prefers.items() %}<option value="{{ key }}" {{ "selected" if v.prefers == key }}>{{ label }}</option>{% endfor %}
+    </select></label>
+  <label class="fieldset md:col-span-2"><span class="fieldset-legend">Notes</span>
+    <input type="text" name="notes" value="{{ v.notes or '' }}" maxlength="1000" placeholder="e.g. happy to talk about M&amp;A; best after 18:00" class="input input-sm w-full"></label>
+</div>
+<label class="flex cursor-pointer items-start gap-2 text-sm">
+  <input type="checkbox" name="consent" value="true" class="checkbox checkbox-sm mt-0.5" {{ "checked" if v.consent }} required>
+  <span>They agreed to be listed here, with these contact details, for seminar members to ask for visits.</span>
+</label>
+{% endmacro %}
+
+<main class="mx-auto max-w-6xl space-y-6 px-4 py-8">
+  <header class="space-y-2">
+    {{ nav.crumbs([("Classes", "/classes"), ("OB/OG visits", None)]) }}
+    <h1 class="page-title text-3xl font-bold tracking-tight">OB/OG visits</h1>
+    <p class="text-sm text-base-content/70">Graduates of the seminar who agreed to be contacted. Seminar members only &mdash;
+      log every visit request, so nobody is messaged twice.</p>
+  </header>
+
+  <div class="grid grid-cols-3 gap-3 sm:max-w-xl">
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ total }}</span><span class="text-xs">OB/OG listed</span></div></div>
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ industries | length }}</span><span class="text-xs">industries</span></div></div>
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ visits_this_month }}</span><span class="text-xs">visit requests this month</span></div></div>
+  </div>
+
+  {% if error %}<div role="alert" class="alert alert-error alert-soft">{{ error }}</div>{% endif %}
+
+  <section class="card" x-data="{ adding: {{ 'true' if error and values.name is defined else 'false' }} }">
+    <div class="card-body gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <form method="get" action="/alumni" class="flex flex-wrap items-center gap-2">
+          <input type="search" name="q" value="{{ q }}" placeholder="Search name, company, industry" class="input input-sm w-64" aria-label="Search">
+          {% if industry %}<input type="hidden" name="industry" value="{{ industry }}">{% endif %}
+          <button type="submit" class="btn btn-sm">Search</button>
+        </form>
+        <button type="button" class="btn btn-primary btn-sm" @click="adding = !adding">+ Add OB/OG</button>
+      </div>
+      <div class="flex flex-wrap gap-1.5" aria-label="Industry">
+        <a href="/alumni{{ '?q=' ~ q if q }}" class="btn btn-xs {{ 'btn-primary' if not industry }}">All</a>
+        {% for name in industries %}
+        <a href="/alumni?industry={{ name | urlencode }}{{ '&q=' ~ (q | urlencode) if q }}" class="btn btn-xs {{ 'btn-primary' if industry == name }}">{{ name }}</a>
+        {% endfor %}
+      </div>
+      <form x-show="adding" x-cloak method="post" action="/alumni" class="space-y-3 border border-base-content/30 bg-white/50 p-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        {{ fields(values) }}
+        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+      </form>
+      <datalist id="industries">{% for name in industries %}<option value="{{ name }}">{% endfor %}</datalist>
+    </div>
+  </section>
+
+  {% if rows %}
+  <div class="overflow-x-auto">
+    <table class="table table-sm bg-white/60">
+      <thead><tr><th>Name</th><th>Company / industry</th><th>Email</th><th>Phone</th><th>Prefers</th><th>Last visit request</th><th></th></tr></thead>
+      {% for r in rows %}{% set a = r.alumnus %}
+      <tbody x-data="{ editing: false, deleting: false, asking: false }">
+        <tr>
+          <td><strong>{{ a.name }}</strong>{% if a.year %}<br><span class="text-xs text-base-content/70">{{ a.year }}</span>{% endif %}
+            {% if a.notes %}<br><span class="text-xs italic">{{ a.notes }}</span>{% endif %}</td>
+          <td>{{ a.company or "—" }}{% if a.industry %}<br><span class="badge badge-ghost badge-xs">{{ a.industry }}</span>{% endif %}</td>
+          <td>{% if a.email %}<a href="mailto:{{ a.email }}" class="link break-all">{{ a.email }}</a>{% else %}—{% endif %}</td>
+          <td class="whitespace-nowrap">{% if a.phone %}<a href="tel:{{ a.phone | replace(' ', '') }}" class="link">{{ a.phone }}</a>{% else %}—{% endif %}</td>
+          <td>{{ prefers[a.prefers] }}</td>
+          <td class="whitespace-nowrap">{% if r.last %}{{ who(r.last_by) if r.last_by else "a former member" }}<br>
+            <span class="text-xs text-base-content/70">{{ r.last.at | jst }}</span>{% else %}<span class="text-base-content/60">Not yet</span>{% endif %}</td>
+          <td class="space-y-1 text-right">
+            <form method="post" action="/alumni/{{ a.id }}/contact" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              {% if r.recent %}
+              <button type="button" class="btn btn-xs" x-show="!asking" @click="asking = true">Log visit request</button>
+              <span x-show="asking" x-cloak class="block max-w-56 whitespace-normal text-left text-xs">
+                &#9888; {{ who(r.last_by) if r.last_by else "Someone" }} asked them on {{ r.last.at | jst }}. Check with them first.
+                <button type="submit" class="btn btn-warning btn-xs mt-1">Log it anyway</button></span>
+              {% else %}
+              <button type="submit" class="btn btn-xs">Log visit request</button>
+              {% endif %}
+            </form>
+            {% if r.can_change %}
+            <button type="button" class="btn btn-ghost btn-xs" @click="editing = !editing">Edit</button>
+            <button type="button" class="btn btn-ghost btn-xs text-error" @click="deleting = !deleting">Remove</button>
+            <form x-show="deleting" x-cloak method="post" action="/alumni/{{ a.id }}/delete" class="text-xs">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              Remove {{ a.name }} from the list? <button type="submit" class="btn btn-error btn-xs">Remove</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% if r.can_change %}
+        <tr x-show="editing" x-cloak><td colspan="7">
+          <form method="post" action="/alumni/{{ a.id }}/edit" class="space-y-3 p-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            {{ fields(a) }}
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+          </form>
+        </td></tr>
+        {% endif %}
+      </tbody>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <p class="text-base-content/70">{% if total %}No one matches.{% else %}No OB/OG listed yet. Add someone who agreed to be contacted.{% endif %}</p>
+  {% endif %}
+</main>
+{% endblock %}

@@ -39,6 +39,7 @@
     </div>
     <div class="flex flex-wrap items-center gap-1 text-sm">
       <a href="/classes" class="btn btn-ghost btn-sm">Classes</a>
+      {% if viewer.is_member %}<a href="/alumni" class="btn btn-ghost btn-sm">OB/OG</a>{% endif %}
       {% if viewer.is_admin %}<a href="/members" class="btn btn-ghost btn-sm">Members</a>{% endif %}
       {% if viewer.is_member %}
         <a href="/account" class="btn btn-ghost btn-sm" title="Your account">{{ viewer.user.full_name }}</a>
