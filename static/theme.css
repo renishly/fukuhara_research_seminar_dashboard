@@ -933,6 +933,15 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   font-size: 0.75rem;
 }
 
+/* "This week" on an agent card: what changed in the last 7 days. */
+.card-week {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  padding: 0.3rem 0.5rem;
+  border-left: 3px solid var(--cobalt);
+  background: rgb(255 255 255 / 0.55);
+}
+
 /* The live feed (partials/live_feed.html, live_feed_body.html). Colours
    follow the state pills. */
 

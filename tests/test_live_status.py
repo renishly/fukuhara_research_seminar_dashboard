@@ -227,3 +227,24 @@ def test_a_run_that_is_due_shows_typing_until_it_comes_in(engine, client, taro, 
     assert "lf-typing" not in body
     live = body[body.index("lf-bubble-live"):body.index("lf-bubble-attention")]
     assert live.index("<span>park</span>") < live.index("<span>other</span>")  # most recent check-in first
+
+
+def test_cards_say_what_changed_this_week(engine, client, taro, hanako, guest, course, create_agent):
+    agent_id = daily_agent(client, create_agent, taro, course)
+    grid = hanako.get(f"/classes/{course}/agents/{taro.id}").text
+    assert "This week:</strong> no changes" in grid
+    now = utc_now()
+    with Session(engine) as db:
+        agent = db.get(Agent, agent_id)
+        db.add(StateChange(agent_id=agent_id, course_id=agent.course_id, at=now - timedelta(days=2), kind="state",
+                           state="offline", message="went offline"))
+        db.add(StateChange(agent_id=agent_id, course_id=agent.course_id, at=now - timedelta(days=2) + timedelta(hours=6),
+                           kind="state", state="live", message="back online"))
+        db.add(StateChange(agent_id=agent_id, course_id=agent.course_id, at=now - timedelta(days=9), kind="state",
+                           state="offline", message="too old to count"))
+        db.commit()
+    client.post("/api/outputs", json={"category": "Debate", "content": "x"}, headers=api("park"))
+    client.post("/api/outputs", json={"category": "Debate", "content": "y"}, headers=api("park"))
+    grid = hanako.get(f"/classes/{course}/agents/{taro.id}").text
+    assert "This week:</strong> offline 1× (6 h) · new output \u201cDebate\u201d" in grid
+    assert "This week" not in guest.get(f"/classes/{course}/agents/{taro.id}").text

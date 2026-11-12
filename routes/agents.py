@@ -36,7 +36,7 @@ from db import (
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
 import run_status
 from checkins import activity as checkin_activity
-from routes.live_feed import sync_all
+from routes.live_feed import sync_all, weekly_summaries
 from routes.agent_tools import (
     MAX_AGENT_NAME,
     MAX_CATEGORY,
@@ -205,11 +205,13 @@ def grid_context(db: Session, viewer: Viewer, course: Course, owner: User, page:
     sync_all(db, everyone, states)
     # Guests only see names, status and descriptions, so they need no details.
     details = grid_details(db, list(agents)) if viewer.is_member else {}
+    week = weekly_summaries(db, list(agents)) if viewer.is_member else {}
     for agent in agents:
         cell = {"agent": agent, "state": states[agent.id]}
         if viewer.is_member:
             # The pinned item: the newest output of the pinned category, or the pinned monitor.
             cell |= details[agent.id]
+            cell["week"] = week[agent.id]
             cell["pinned_label"] = agent.pinned_category or agent.pinned_monitor_name
         cells.append(cell)
     pinned_files = file_details(db, [c["pinned"].file_id for c in cells if c.get("pinned") and c["pinned"].file_id])

@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse
 from sqlmodel import Session, delete, func, select
 
 from checkins import allowed_gap, check_in_interval, describe
-from db import Agent, CheckInSpan, StateChange, User, as_utc, get_session, utc_now
+from db import Agent, CheckInSpan, Monitor, Output, StateChange, User, as_utc, get_session, utc_now
 from routes.agent_tools import AgentState, states_for
 from routes.common import get_course, not_found
 from run_status import RunStatus
@@ -366,3 +366,57 @@ def agents_by_state(request: Request, course_id: int, day: str, state: str, view
     return render(request, db, viewer, "agents_by_state.html", course=course, bar=bar, state_key=state,
                   state_words=dict(BAR_STATES)[state], cards=[{"agent": a, "owner": owners.get(a.owner_id),
                                                                "state": states[a.id]} for a in picked])
+
+
+# ---------------------------------------------------------------------------
+# "This week" on each agent card (Yui's summary)
+# ---------------------------------------------------------------------------
+
+WEEK = timedelta(days=7)
+WEEK_ITEMS = 4
+
+
+def weekly_summaries(db: Session, agents: list[Agent], now: datetime | None = None) -> dict[int, list[str]]:
+    """What changed for each agent in the last 7 days, in a few short items:
+    times offline (and for how long in all), times it needed attention, new
+    data, and new output categories and monitors. [] if nothing changed."""
+    now = now or utc_now()
+    since = now - WEEK
+    ids = [agent.id for agent in agents]
+    result: dict[int, list[str]] = {i: [] for i in ids}
+    if not ids:
+        return result
+    rows: dict[int, list[StateChange]] = {i: [] for i in ids}
+    for row in db.exec(select(StateChange).where(StateChange.agent_id.in_(ids), StateChange.kind != "start",
+                                                 StateChange.at >= since)
+                       .order_by(StateChange.at, StateChange.id)).all():
+        rows[row.agent_id].append(row)
+    new_categories: dict[int, list[str]] = {i: [] for i in ids}
+    for agent_id, category, first in db.exec(
+            select(Output.agent_id, Output.category, func.min(Output.created_at))
+            .where(Output.agent_id.in_(ids)).group_by(Output.agent_id, Output.category)).all():
+        if as_utc(first) >= since:
+            new_categories[agent_id].append(category)
+    new_monitors: dict[int, list[str]] = {i: [] for i in ids}
+    for monitor in db.exec(select(Monitor).where(Monitor.agent_id.in_(ids), Monitor.created_at >= since)).all():
+        new_monitors[monitor.agent_id].append(monitor.name)
+
+    for agent_id in ids:
+        items, history = [], rows[agent_id]
+        offline = [row for row in history if row.state == "offline"]
+        if offline:
+            down = timedelta()
+            for row in offline:  # until the next change (or now, if still offline)
+                after = next((r for r in history if r.at > row.at and r.kind == "state"), None)
+                down += (as_utc(after.at) if after else now) - as_utc(row.at)
+            items.append(f"offline {len(offline)}× ({describe(down.total_seconds())})")
+        attention = sum(1 for row in history if row.state == "attention")
+        if attention:
+            items.append(f"needed attention {attention}×")
+        data = sum(1 for row in history if row.kind == "data")
+        if data:
+            items.append(f"{data}× new data")
+        items += [f"new output \u201c{name}\u201d" for name in sorted(new_categories[agent_id], key=str.lower)]
+        items += [f"new monitor \u201c{name}\u201d" for name in sorted(new_monitors[agent_id], key=str.lower)]
+        result[agent_id] = items[:WEEK_ITEMS] + ([f"+{len(items) - WEEK_ITEMS} more"] if len(items) > WEEK_ITEMS else [])
+    return result
