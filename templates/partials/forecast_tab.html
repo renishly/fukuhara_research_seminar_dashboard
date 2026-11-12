@@ -1,0 +1,49 @@
+{# Jimin's Level 2-3 on the agent page (forecasts.py): a week's forecast
+   beside the week before, why it changed, and the evidence; ‹ › browses
+   earlier weeks. The debates are in the Debate tab. #}
+<section class="card" aria-labelledby="forecast-title" x-data="{ i: 0, n: {{ forecasts | length }} }">
+  <div class="card-body gap-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 id="forecast-title" class="card-title">Forecast</h2>
+      <div class="join" aria-label="Week">
+        <button type="button" class="btn btn-sm join-item" :disabled="i >= n - 1" @click="i++" aria-label="Earlier week">&lsaquo; Earlier</button>
+        <button type="button" class="btn btn-sm join-item" :disabled="i === 0" @click="i--" aria-label="Later week">Later &rsaquo;</button>
+      </div>
+    </div>
+    {% for f in forecasts %}{% set before = forecasts[loop.index] if loop.index < forecasts | length else none %}
+    <div x-show="i === {{ loop.index0 }}" {{ 'x-cloak' if not loop.first }} class="space-y-4">
+      <p class="text-lg font-semibold">{{ f.target }}</p>
+      <div class="grid gap-3 sm:grid-cols-2">
+        {% for label, item in [("Last week" if loop.first else "The week before", before), ("This week" if loop.first else "That week", f)] %}
+        <div class="fc-card {{ 'fc-current' if loop.last }}">
+          <p class="text-xs font-semibold uppercase tracking-wide text-base-content/70">{{ label }}{% if item %} &middot; {{ item.week_label }}{% endif %}</p>
+          {% if item %}
+          <p class="font-mono text-3xl font-bold">{{ item.value | num }} <span class="text-base font-normal">{{ item.unit }}</span></p>
+          <p class="flex flex-wrap gap-2 text-sm">
+            {% if item.view %}<span class="badge badge-outline">{{ item.view }}</span>{% endif %}
+            {% if item.market %}<span class="text-base-content/70">market {{ item.market | num }} ({{ "%+.1f" | format(item.vs_market) }}%)</span>{% endif %}
+          </p>
+          {% else %}<p class="text-sm text-base-content/60">No forecast that week.</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <div class="space-y-1">
+        <h3 class="font-semibold">Why it changed</h3>
+        {% if f.why_changed %}<p class="whitespace-pre-line text-sm">{{ f.why_changed }}</p>
+        {% else %}<p class="text-sm text-base-content/60">Not given.</p>{% endif %}
+      </div>
+      <div class="space-y-1">
+        <h3 class="font-semibold">Supporting evidence</h3>
+        {% if f.evidence %}
+        <ul class="list-disc space-y-0.5 pl-5 text-sm">
+          {% for title, url in f.evidence %}
+          <li>{% if url %}<a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="link">{{ title }}</a>{% else %}{{ title }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="text-sm text-base-content/60">None given.</p>{% endif %}
+      </div>
+      {% if debate %}<p class="text-sm">The agents' debate is in the <button type="button" class="link" @click="pick('debate')">Debate</button> tab.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>

@@ -175,6 +175,23 @@ CHECK-INS
   the agent page wins over the agent's. Any call to the dashboard also counts
   as being seen.
 
+WEEKLY FORECAST (the seminar's standard, so forecasts can be compared)
+  Send it as an output in the category "Forecast", once a week:
+      output({"target": "Mitsui Fudosan (8801)", "value": 1205, "unit": "JPY",
+              "market": 1470, "view": "Underweight",
+              "why_changed": "Cost of equity rose to 12% (Fama-French)",
+              "evidence": [{"title": "Peer multiples", "url": "https://..."}]},
+             "Forecast")
+  Only "target" and "value" are needed; "week" (e.g. "2026-W46") defaults to
+  the week it's sent. It shows in the class's Forecasts tab (this week vs last)
+  and in the agent's Forecast tab. Debates: outputs whose category contains
+  "debate" show in the agent's Debate tab.
+
+RUN STATUS (optional, for "Needs attention")
+  Keep a monitor named exactly "Run status" with {"last_run", "last_status"
+  (failed | not_due | no_new_data | new_data), "steps": [{"name", "state"
+  (ok | failing | silent), "last_run", "last_new_data", "note"}]}.
+
 START AND PAUSE (the dashboard's buttons)
   They reach the agent at its next check-in. While paused, output() and
   set_monitor() hold what you send and deliver it, in order and with its

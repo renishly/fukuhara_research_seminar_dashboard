@@ -6,7 +6,7 @@
      a small "My dashboard" link to their own agents. #}
   <div class="flex justify-center">
     <div class="class-tabs" role="tablist">
-      {% for name in tabs if name not in ("skills", "documents") or viewer.is_member %}
+      {% for name in tabs if name not in ("skills", "documents", "forecasts") or viewer.is_member %}
       <span class="tab-slot">
         {% if name == "agents" and my_dashboard %}
         <a href="/classes/{{ course.id }}/agents/{{ viewer.id }}" class="my-dashboard link">My dashboard</a>
@@ -20,7 +20,10 @@
     </div>
   </div>
 
-  {% if tab == "documents" %}
+  {% if tab == "forecasts" %}
+  {% if viewer.is_member %}{% include "partials/forecast_overview.html" %}
+  {% else %}<p class="text-center text-base-content/70">Sign in as a member to see the forecasts.</p>{% endif %}
+  {% elif tab == "documents" %}
   {# Ngoc's documents: the class's shared Google Drive folder, browsed in place. #}
   {% if documents_embed %}
   <section class="card">

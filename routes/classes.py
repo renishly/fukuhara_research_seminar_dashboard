@@ -38,6 +38,7 @@ from permissions import (
     is_enrolled,
     visible_courses,
 )
+import forecasts
 import market
 import progress
 from uploads import drive_folder_embed
@@ -400,6 +401,15 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
     # A student in this class gets "My dashboard" above the Agents tab.
     context["my_dashboard"] = context["can_submit"] and "agents" in context["tabs"]
+    if tab == "forecasts":  # Jimin's overview: every agent's forecast, this week vs last (members only)
+        if viewer.is_member:
+            agents = list(db.exec(select(Agent).where(Agent.course_id == course.id)).all())
+            owners = {u.id: u for u in db.exec(select(User).where(User.id.in_({a.owner_id for a in agents}))).all()} \
+                if agents else {}
+            students = [cell["student"] for group in student_groups(db, viewer, course) for cell in group.cells]
+            context |= {"forecast_people": forecasts.by_person(db, students, agents), "forecast_owners": owners,
+                        "forecast_states": states_for(db, agents)}
+        return context
     if tab == "documents":  # the class's shared Google Drive folder (members only)
         return context | {"documents_embed": drive_folder_embed(course.documents_url) if viewer.is_member else None}
     if tab == "skills":  # the Agent Skills market (members only)

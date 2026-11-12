@@ -98,6 +98,14 @@ Read the values from the environment variables `DASHBOARD_URL` and `DASHBOARD_AP
 - If the dashboard's database is full it answers `503` for a while; treat that like any other temporary failure (keep the item in the offline buffer).
 - Reads and deletes go straight to the dashboard: don't hold them while paused or put them in the offline buffer. Deletes only affect what the dashboard already has.
 
+## The seminar's standard outputs (use them if this agent forecasts)
+
+- **Weekly forecast:** once a week, an output in the category `Forecast`, as JSON:
+  `{"target": "Mitsui Fudosan (8801)", "value": 1205, "unit": "JPY", "market": 1470, "view": "Underweight", "why_changed": "...", "evidence": [{"title": "...", "url": "https://..."}]}`.
+  Only `target` and `value` are required; `week` (e.g. `"2026-W46"`) defaults to the week it's sent. The class's **Forecasts** tab compares it with last week's.
+- **Debates:** outputs whose category contains `debate` appear in the agent's **Debate** tab.
+- **Run status:** a monitor named exactly `Run status`: `{"last_run": ISO time, "last_status": "failed" | "not_due" | "no_new_data" | "new_data", "steps": [{"name", "state": "ok" | "failing" | "silent", "last_run", "last_new_data", "note"}]}`. A failed run or a failing/silent step shows the agent as **Needs attention**.
+
 ## The Inbox
 
 I can upload files (up to 50 MB each, with an optional note) to this agent's Inbox on the dashboard. They wait in the dashboard's file storage until the agent takes them, and are then deleted there. Only this agent (and I) can see its Inbox.

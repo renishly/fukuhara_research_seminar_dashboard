@@ -34,6 +34,7 @@ from db import (
     utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
+import forecasts
 import run_status
 from checkins import activity as checkin_activity
 from routes.live_feed import sync_all, weekly_summaries
@@ -583,6 +584,7 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
     context = header_context(db, viewer, agent) | both_feeds(db, viewer, agent)
     context["activity"] = checkin_activity(db, agent, context["state"].rhythm)
     context |= debate_context(db, agent)
+    context["forecasts"] = forecasts.weekly(db, [agent.id])[agent.id]  # Jimin's Forecast tab (if it sends any)
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}
     course = db.get(Course, agent.course_id)

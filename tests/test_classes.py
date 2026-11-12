@@ -241,8 +241,8 @@ def test_classes_have_the_tabs_ticked_at_creation(make_person, create_class):
     all_three = create_class(title="All", enrolled_gens=[9])
     no_exams = create_class(title="No exams", enrolled_gens=[9], has_exams=False)
     only_assignments = create_class(title="Only assignments", enrolled_gens=[9], has_exams=False, has_agents=False)
-    assert tab_buttons(student.get(f"/classes/{all_three}").text) == ["assignments", "exams", "agents", "skills"]
-    assert tab_buttons(student.get(f"/classes/{no_exams}").text) == ["assignments", "agents", "skills"]
+    assert tab_buttons(student.get(f"/classes/{all_three}").text) == ["assignments", "exams", "agents", "skills", "forecasts"]
+    assert tab_buttons(student.get(f"/classes/{no_exams}").text) == ["assignments", "agents", "skills", "forecasts"]
     assert tab_buttons(student.get(f"/classes/{only_assignments}").text) == ["assignments"]
 
 

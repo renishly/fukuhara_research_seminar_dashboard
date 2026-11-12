@@ -1,0 +1,54 @@
+{# Jimin's Level 1 (forecasts.py), per person: every student in the class,
+   with one line per agent of theirs that sends forecasts (its target, this
+   week's forecast against last week's, the change), or "No forecast". An
+   agent's name opens its Forecast tab (Level 2). Members only. #}
+{% import "partials/agent_state.html" as states %}
+<section class="card" aria-labelledby="forecasts-title">
+  <div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="forecasts-title" class="card-title">Forecasts</h2>
+      <p class="text-xs text-base-content/70">Each member's forecasts: this week against last week</p>
+    </div>
+    {% if forecast_people %}
+    <div class="overflow-x-auto">
+      <table class="table table-sm fc-table">
+        <thead><tr><th>Member</th><th>Target</th><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th><th>View</th></tr></thead>
+        {% for p in forecast_people %}
+        <tbody>
+          {% if not p.rows %}
+          <tr><th scope="row">{{ "You" if p.student.id == viewer.id else who(p.student) }}</th>
+            <td colspan="6" class="text-base-content/60">No forecast</td></tr>
+          {% endif %}
+          {% for r in p.rows %}{% set st = forecast_states.get(r.agent.id) %}
+          <tr>
+            {% if loop.first %}<th scope="row" rowspan="{{ p.rows | length }}" class="align-top">{{ "You" if p.student.id == viewer.id else who(p.student) }}
+              {% if p.rows | length > 1 %}<br><span class="text-xs font-normal text-base-content/70">{{ p.rows | length }} forecasts</span>{% endif %}</th>{% endif %}
+            <td class="font-semibold">{{ r.this.target }}</td>
+            <td><a href="/agents/{{ r.agent.id }}#forecast" class="link font-semibold {{ states.name_colour(st) if st }}">{{ r.agent.name }}</a></td>
+            <td class="whitespace-nowrap"><strong class="font-mono">{{ r.this.value | num }}</strong> {{ r.this.unit }}
+              <br><span class="text-xs text-base-content/70">{{ r.this.week_label }}</span></td>
+            <td class="whitespace-nowrap">{% if r.last %}<span class="font-mono">{{ r.last.value | num }}</span> {{ r.last.unit }}
+              <br><span class="text-xs text-base-content/70">{{ r.last.week_label }}</span>{% else %}<span class="text-base-content/60">first week</span>{% endif %}</td>
+            <td class="whitespace-nowrap">{% if r.change %}
+              <span class="fc-change fc-{{ r.change.direction }}">{{ {"up": "▲", "down": "▼", "same": "="}[r.change.direction] }}
+                {{ "%+g" | format(r.change.difference | round(2)) }}{% if r.change.percent is not none %} ({{ "%+.1f" | format(r.change.percent) }}%){% endif %}</span>
+              {% else %}—{% endif %}</td>
+            <td>{% if r.this.view %}<span class="badge badge-outline badge-sm">{{ r.this.view }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+    </div>
+    {% if not forecast_people | selectattr("rows") | list %}
+    <p class="text-sm text-base-content/70">No forecasts yet. An agent sends its weekly forecast as an output in the
+      category <code>Forecast</code>: <code>output({"target": "...", "value": 1205, "unit": "JPY", "view": "Underweight",
+      "why_changed": "...", "evidence": [{"title": "...", "url": "https://..."}]}, "Forecast")</code>.</p>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-base-content/70">Nobody is enrolled yet. No forecasts yet. An agent sends its weekly forecast as an output in the
+      category <code>Forecast</code>: <code>output({"target": "...", "value": 1205, "unit": "JPY", "view": "Underweight",
+      "why_changed": "...", "evidence": [{"title": "...", "url": "https://..."}]}, "Forecast")</code>.</p>
+    {% endif %}
+  </div>
+</section>

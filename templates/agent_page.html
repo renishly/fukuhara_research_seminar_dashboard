@@ -18,7 +18,8 @@
     {# Tabs (Rin's proposal): one section at a time, under the header. The tab
        is kept in the address (#outputs...), so a link can open it. Debate only
        for agents that post debate results. #}
-    {% set tabs = [("overview", "Overview"), ("monitors", "Monitors"), ("outputs", "Outputs")]
+    {% set tabs = [("overview", "Overview")] + ([("forecast", "Forecast")] if forecasts else [])
+                  + [("monitors", "Monitors"), ("outputs", "Outputs")]
                   + ([("debate", "Debate")] if debate else []) + [("activity", "Activity")] %}
     <div class="min-w-0 space-y-6"
          x-data="{ tab: 'overview', names: {{ tabs | map('first') | list | tojson | forceescape }},
@@ -34,6 +35,9 @@
         {% include "partials/run_steps.html" %}
         {% include "partials/checkin_graph.html" %}
       </div>
+      {% if forecasts %}
+      <div x-show="tab === 'forecast'" x-cloak>{% include "partials/forecast_tab.html" %}</div>
+      {% endif %}
       {# Monitors (datapoints kept up to date) and Outputs (one-off results). #}
       <div x-show="tab === 'monitors'" x-cloak>{% with f=monitors_feed %}{% include "partials/feed.html" %}{% endwith %}</div>
       <div x-show="tab === 'outputs'" x-cloak>{% with f=outputs_feed %}{% include "partials/feed.html" %}{% endwith %}</div>
