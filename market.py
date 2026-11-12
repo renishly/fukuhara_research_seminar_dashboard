@@ -646,6 +646,10 @@ def build_prompt(db: Session) -> tuple[str, list[Skill]]:
     return "\n".join(lines), skills
 
 
+def model_name() -> str:
+    return (os.getenv("OPENROUTER_MODEL") or DEFAULT_MODEL).strip()
+
+
 def ask_model(prompt: str) -> str:
     """Send one request to OpenRouter and return the model's reply text."""
     response = requests.post(

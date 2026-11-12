@@ -282,6 +282,21 @@ class CheckInSpan(SQLModel, table=True):
     ended_at: datetime = Field(index=True)
 
 
+class ChatMessage(SQLModel, table=True):
+    """One message of a member's conversation with the seminar chat (assistant.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role: str  # "user" or "assistant"
+    content: str = Field(sa_column=Column(Text, nullable=False))
+    # The answer's sources: [{"kind", "title", "url"}], cited as [1], [2]...
+    sources: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    note: str = ""  # why an answer has no AI text (e.g. the daily budget is used up)
+    used_ai: bool = False  # this answer used one OpenRouter request
+    tokens: int = 0  # tokens it used (prompt + answer), as OpenRouter reported
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class Alumnus(SQLModel, table=True):
     """An OB/OG (a graduate of the seminar) who agreed to be contacted for
     visits (Kenichi). Seminar-wide; members only (see routes/alumni.py)."""

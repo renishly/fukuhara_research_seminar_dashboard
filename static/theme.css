@@ -933,6 +933,34 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   font-size: 0.75rem;
 }
 
+/* The top bar: name left, tools in the middle, basics right. */
+.top-bar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem; }
+@media (max-width: 48rem) {
+  .top-bar { grid-template-columns: 1fr auto; }
+  .top-bar > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+}
+
+/* The chat page (chat.html, partials/chat_messages.html, chat_budget.html). */
+.chat-log { display: flex; flex-direction: column; height: 60vh; min-height: 22rem; overflow-y: auto; padding-right: 0.25rem; }
+.chat-bubble.chat-mine { background: var(--cobalt); color: #ffffff; }
+.chat-bubble.chat-theirs { background: #ffffff; color: var(--ink); border: 1px solid rgb(11 31 58 / 0.2); max-width: 85%; }
+.chat-bot {
+  display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem;
+  border-radius: 50%; background: var(--ink); color: #ffffff; font-size: 1rem;
+}
+.ask-cite { font-weight: 700; color: var(--cobalt); text-decoration: none; font-size: 0.8em; vertical-align: super; }
+.ask-cite:hover { text-decoration: underline; }
+.chat-source { max-width: 100%; font-weight: 500; }
+.chat-thinking { display: none; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: rgb(11 31 58 / 0.7); }
+.chat-thinking.htmx-request { display: flex; }
+.budget-bar { display: flex; gap: 2px; height: 0.9rem; border-radius: 4px; overflow: hidden; background: rgb(11 31 58 / 0.08); }
+.budget-bar > span { flex-basis: 0; min-width: 3px; }
+.budget-key { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; }
+.budget-left { background: #c9f0d8; box-shadow: inset 0 0 0 1px #11714f; }
+.budget-chat { background: var(--cobalt); }
+.budget-reserved { background: repeating-linear-gradient(135deg, #6250d6 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px #6250d6; }
+.budget-org { background: #6250d6; }
+
 /* Jimin's forecasts (partials/forecast_overview.html, forecast_tab.html). */
 .fc-table tbody + tbody { border-top: 2px solid rgb(11 31 58 / 0.25); }
 .fc-change { font-weight: 700; font-variant-numeric: tabular-nums; }

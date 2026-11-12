@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
+{% block title %}Chat{% endblock %}
+{% block content %}
+{# The seminar chat (Yuri's Knowledge Hub): ask about anything on the
+   dashboard. Members only. The form posts with HTMX and adds the question
+   and the answer to the end; the budget panel updates itself. #}
+<main class="mx-auto max-w-6xl space-y-4 px-4 py-6">
+  <header class="flex flex-wrap items-end justify-between gap-2">
+    <div class="space-y-1">
+      {{ nav.crumbs([("Classes", "/classes"), ("Chat", None)]) }}
+      <h1 class="page-title text-3xl font-bold tracking-tight">Chat</h1>
+      <p class="text-sm text-base-content/70">Ask about anything on the dashboard: assignments, deadlines, submissions,
+        agents, forecasts, skills, OB/OG. Answers link to where things are.</p>
+    </div>
+    <form method="post" action="/chat/clear" onsubmit="return confirm('Clear your conversation?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn btn-ghost btn-sm">Clear chat</button>
+    </form>
+  </header>
+
+  <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
+    <section class="card chat-panel">
+      <div class="card-body gap-3 p-4">
+        <ul id="chat-log" class="chat-log" aria-live="polite">
+          {% if not messages %}
+          <li class="chat chat-start" id="chat-hello">
+            <div class="chat-image"><span class="chat-bot" aria-hidden="true">&#10022;</span></div>
+            <div class="chat-bubble chat-theirs">Hi {{ viewer.user.full_name }}! Ask me about anything on the dashboard, or try one of the suggestions below.</div>
+          </li>
+          {% endif %}
+          {% include "partials/chat_messages.html" %}
+        </ul>
+        <div id="chat-thinking" class="chat-thinking htmx-indicator"><span class="lf-dots"><i></i><i></i><i></i></span> thinking&hellip;</div>
+        <div class="flex flex-wrap gap-1.5">
+          {% for s in suggestions %}
+          <button type="button" class="btn btn-xs btn-outline" onclick="chatAsk(this.textContent)">{{ s }}</button>
+          {% endfor %}
+        </div>
+        <form id="chat-form" class="flex items-end gap-2" hx-post="/chat" hx-target="#chat-log" hx-swap="beforeend"
+              hx-indicator="#chat-thinking" hx-disabled-elt="find button"
+              hx-on::before-request="document.getElementById('chat-hello')?.remove()"
+              hx-on::after-request="if (event.detail.successful) this.reset()">
+          <textarea name="question" rows="2" maxlength="1000" required class="textarea w-full" placeholder="Ask a question… (Enter to send, Shift+Enter for a new line)"
+                    onkeydown="if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.form.requestSubmit(); }"
+                    aria-label="Your question"></textarea>
+          <button type="submit" class="btn btn-primary">Send</button>
+        </form>
+      </div>
+    </section>
+    <aside>{% include "partials/chat_budget.html" %}</aside>
+  </div>
+</main>
+<script>
+  // Suggestions fill the box and send it; new messages scroll into view.
+  function chatAsk(text) {
+    const form = document.getElementById("chat-form");
+    form.querySelector("textarea").value = text.trim();
+    form.requestSubmit();
+  }
+  function chatBottom() { const log = document.getElementById("chat-log"); log.scrollTop = log.scrollHeight; }
+  document.addEventListener("DOMContentLoaded", chatBottom);
+  document.addEventListener("htmx:afterSettle", chatBottom);
+</script>
+{% endblock %}

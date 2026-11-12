@@ -1,0 +1,32 @@
+{# The seminar's shared daily AI budget (assistant.budget()): one OpenRouter
+   allowance a day for everyone. The bar: used by the skill organizer, kept
+   for it, used by chat, left for chat. Updated after every question. #}
+{% set b = budget %}
+<section id="chat-budget" {% if oob %}hx-swap-oob="true"{% endif %} class="card" aria-labelledby="budget-title">
+  <div class="card-body gap-3">
+    <h2 id="budget-title" class="card-title text-base">Today's AI budget</h2>
+    {% if not b.has_key %}
+    <p class="text-sm">No AI model is set up (<code>OPENROUTER_API_KEY</code>). The chat answers with matching items from the dashboard instead.</p>
+    {% else %}
+    <p class="text-sm">One OpenRouter allowance for the whole seminar: <strong>{{ b.total }}</strong> requests a day (Japan time).</p>
+    <div class="budget-bar" role="img" aria-label="{{ b.organizer_used }} used by the skill organizer, {{ b.reserved }} kept for it, {{ b.chat_used }} used by chat, {{ b.chat_left }} left for chat">
+      {% for key, n in [("org", b.organizer_used), ("reserved", b.reserved), ("chat", b.chat_used), ("left", b.chat_left)] if n %}
+      <span class="budget-{{ key }}" style="flex-grow: {{ n }}"></span>
+      {% endfor %}
+    </div>
+    <ul class="space-y-1 text-sm">
+      <li class="flex items-center gap-2"><span class="budget-key budget-left"></span>Left for chat <strong class="ml-auto font-mono">{{ b.chat_left }}</strong></li>
+      <li class="flex items-center gap-2"><span class="budget-key budget-chat"></span>Used by chat <strong class="ml-auto font-mono">{{ b.chat_used }}</strong></li>
+      <li class="flex items-center gap-2"><span class="budget-key budget-reserved"></span>Kept for the skill organizer <strong class="ml-auto font-mono">{{ b.reserved }}</strong></li>
+      <li class="flex items-center gap-2"><span class="budget-key budget-org"></span>Used by the skill organizer <strong class="ml-auto font-mono">{{ b.organizer_used }}</strong></li>
+    </ul>
+    <p class="text-xs text-base-content/70">Tokens used by chat today: <strong class="font-mono">{{ "{:,}".format(b.tokens_today) }}</strong>
+      &middot; your questions left today: <strong class="font-mono">{{ b.mine_left }}</strong> of {{ b.per_member }}</p>
+    {% if b.key %}
+    <p class="text-xs text-base-content/70">OpenRouter account: {{ "free tier" if b.key.is_free_tier else "paid" }}
+      {% if b.key.usage is not none %}&middot; credit used ${{ "%.2f" | format(b.key.usage) }}{% endif %}
+      {% if b.key.limit_remaining is not none %}&middot; left ${{ "%.2f" | format(b.key.limit_remaining) }}{% endif %}</p>
+    {% endif %}
+    {% endif %}
+  </div>
+</section>

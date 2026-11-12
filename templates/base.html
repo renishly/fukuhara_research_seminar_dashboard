@@ -33,13 +33,20 @@
       {% if viewer %}hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'{% endif %}>
 
   {% if viewer %}
-  <nav class="navbar flex-wrap gap-2 border-b-[1.5px] border-base-content bg-base-200/80 px-4">
-    <div class="flex-1 min-w-0">
+  {# Top bar: the seminar's name on the left; tools in the middle (Chat, OB/OG:
+     members only); the basics on the right (Classes, Members, account). #}
+  <nav class="navbar top-bar border-b-[1.5px] border-base-content bg-base-200/80 px-4">
+    <div class="min-w-0">
       <a href="/classes" class="font-bold tracking-tight truncate">Fukuhara<span class="hidden sm:inline"> Research</span> Seminar</a>
     </div>
-    <div class="flex flex-wrap items-center gap-1 text-sm">
+    <div class="flex items-center justify-center gap-1 text-sm" aria-label="Tools">
+      {% if viewer.is_member %}
+      <a href="/chat" class="btn btn-sm {{ 'btn-primary' if request and request.url.path == '/chat' else 'btn-outline' }}">&#10022; Chat</a>
+      <a href="/alumni" class="btn btn-sm {{ 'btn-primary' if request and request.url.path == '/alumni' else 'btn-outline' }}">OB/OG</a>
+      {% endif %}
+    </div>
+    <div class="flex flex-wrap items-center justify-end gap-1 text-sm">
       <a href="/classes" class="btn btn-ghost btn-sm">Classes</a>
-      {% if viewer.is_member %}<a href="/alumni" class="btn btn-ghost btn-sm">OB/OG</a>{% endif %}
       {% if viewer.is_admin %}<a href="/members" class="btn btn-ghost btn-sm">Members</a>{% endif %}
       {% if viewer.is_member %}
         <a href="/account" class="btn btn-ghost btn-sm" title="Your account">{{ viewer.user.full_name }}</a>

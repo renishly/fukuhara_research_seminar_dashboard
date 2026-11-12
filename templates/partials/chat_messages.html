@@ -1,0 +1,23 @@
+{# Chat messages (routes/chat.py): the member's on the right, the assistant's
+   on the left, its citations [n] linked, and buttons to open what it cites. #}
+{% for m in messages if m.note != "cleared" %}
+{% if m.role == "user" %}
+<li class="chat chat-end"><div class="chat-bubble chat-mine">{{ m.content }}</div></li>
+{% else %}
+<li class="chat chat-start">
+  <div class="chat-image"><span class="chat-bot" aria-hidden="true">&#10022;</span></div>
+  <div class="chat-bubble chat-theirs space-y-2">
+    {% if m.content %}<div class="whitespace-pre-line">{{ chat_linked(m.content, m.sources or []) }}</div>{% endif %}
+    {% if m.note %}<p class="text-sm text-base-content/75">{{ m.note }}</p>{% endif %}
+    {% if m.sources %}
+    <div class="flex flex-wrap gap-1.5 pt-1" aria-label="Open">
+      {% for n, s in chat_cited(m.content, m.sources) %}
+      <a href="{{ s.url }}" class="btn btn-xs chat-source" title="{{ s.kind }}: {{ s.title }}">
+        <span class="font-mono">[{{ n }}]</span> {{ s.kind }}: <span class="max-w-48 truncate">{{ s.title }}</span> &rarr;</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</li>
+{% endif %}
+{% endfor %}
