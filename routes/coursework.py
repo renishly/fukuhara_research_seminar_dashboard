@@ -284,12 +284,13 @@ def task_choices(db: Session, viewer: Viewer, course, kind: str) -> tuple[list[T
     return tasks[:RECENT_TASKS_IN_DROPDOWN], tasks[RECENT_TASKS_IN_DROPDOWN:]
 
 
-def submission_form(request, db, viewer, course, kind, submission=None, values=None, error=None, status_code=200):
+def submission_form(request, db, viewer, course, kind, submission=None, values=None, error=None, status_code=200,
+                    task_id: int | None = None):
     if values is None:
         values = {
             "title": (submission.title or "") if submission else "",
             "description": (submission.description or "") if submission else "",
-            "task_id": submission.task_id if submission else None,
+            "task_id": submission.task_id if submission else task_id,
             "mode": "text" if (submission and submission.content_text is not None) else "file",
             "content_text": (submission.content_text or "") if submission else "",
             "guest_visible": submission.guest_visible if submission else False,
@@ -329,10 +330,11 @@ def own_course(db: Session, viewer: Viewer, course_id: int):
 
 
 @router.get("/classes/{course_id}/{kinds}/submissions/new")
-def new_submission_form(request: Request, course_id: int, kinds: str, viewer: Viewer = Depends(require_member),
-                        db: Session = Depends(get_session)):
+def new_submission_form(request: Request, course_id: int, kinds: str, task: int | None = None,
+                        viewer: Viewer = Depends(require_member), db: Session = Depends(get_session)):
+    """The submit form; ?task= picks that assignment already (the to-do list's "Submit here")."""
     course = own_course(db, viewer, course_id)
-    return submission_form(request, db, viewer, course, kind_of(kinds, course))
+    return submission_form(request, db, viewer, course, kind_of(kinds, course), task_id=task)
 
 
 @router.post("/classes/{course_id}/{kinds}/submissions")

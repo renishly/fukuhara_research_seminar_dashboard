@@ -346,3 +346,20 @@ def test_students_are_stacked_gen_sections_not_a_draggable_window(admin, create_
     for tab in ("assignments", "agents"):
         page = admin.get(f"/classes/{course}", params={"tab": tab}).text
         assert "data-plane" not in page and "Re-centre" not in page
+
+
+def test_documents_tab_shows_the_class_drive_folder_to_members(engine, admin, guest, make_person, create_class):
+    from conftest import class_form
+    taro = make_person("student", "taro", gen=9)
+    course = create_class(enrolled_gens=[9])
+    assert "documents" not in tab_buttons(taro.get(f"/classes/{course}").text)  # no folder yet: no tab
+    bad = admin.post(f"/classes/{course}/edit",
+                     data=class_form(engine, enrolled_gens=[9]) | {"documents_url": "https://example.com/folders/x"})
+    assert "paste a Google Drive folder link" in bad.text
+    folder = "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMn?usp=sharing"
+    admin.post(f"/classes/{course}/edit", data=class_form(engine, enrolled_gens=[9]) | {"documents_url": folder})
+    assert "documents" in tab_buttons(taro.get(f"/classes/{course}").text)
+    tab = taro.get(f"/classes/{course}", params={"tab": "documents"}).text
+    assert "https://drive.google.com/embeddedfolderview?id=1AbCdEfGhIjKlMn#list" in tab
+    assert "documents" not in tab_buttons(guest.get(f"/classes/{course}").text)  # members only
+    assert "embeddedfolderview" not in guest.get(f"/classes/{course}", params={"tab": "documents"}).text

@@ -611,3 +611,47 @@ def test_csv_shows_as_a_table_and_json_laid_out(engine, admin, taro, course):
     assert "sandbox" in table.headers["content-security-policy"]
     laid_out = preview_of(admin, engine, "out.json")
     assert laid_out.headers["content-type"].startswith("text/plain") and laid_out.text.startswith('{\n  "a": 1')
+
+
+# --- Ngoc's to-do list and submission overview -----------------------------------------
+
+
+def task_id(engine, title):
+    with Session(engine) as db:
+        return db.exec(select(Task).where(Task.title == title)).one().id
+
+
+def test_overview_marks_on_time_late_missing_and_not_due(engine, admin, taro, make_person, guest, course):
+    hanako = make_person("student", "hanako", "Sato Hanako", gen=9)
+    post_task(admin, course, title="Past one", hours=-5)
+    post_task(admin, course, title="Next one", hours=48)
+    past, upcoming = task_id(engine, "Past one"), task_id(engine, "Next one")
+    submit(taro, course, title="Late essay", task=past)  # after the deadline: late
+    submit(taro, course, title="Early essay", task=upcoming)  # before it: on time
+    tab = hanako.get(f"/classes/{course}", params={"tab": "assignments"}).text
+    assert "Submission overview" in tab  # every member sees everyone (as chosen)
+    assert "1 on time" in tab and "1 late" in tab and "1 missing" in tab  # Hanako missed "Past one"
+    assert 'class="sub-flagged"' in tab
+    assert "Submission overview" not in guest.get(f"/classes/{course}", params={"tab": "assignments"}).text
+
+
+def test_todo_lists_my_tasks_by_deadline_with_submit_here(engine, admin, taro, course):
+    post_task(admin, course, title="Missed it", hours=-5)
+    post_task(admin, course, title="Tomorrow", hours=24)
+    post_task(admin, course, title="Next month", hours=24 * 30)
+    post_task(admin, course, title="Handed in", hours=24 * 5)
+    submit(taro, course, title="Mine", task=task_id(engine, "Handed in"))
+    tab = taro.get(f"/classes/{course}", params={"tab": "assignments"}).text
+    todo = tab[tab.index('id="todo-title"'):tab.index("Submission overview")]
+    assert todo.index("Overdue (1)") < todo.index("Missed it") < todo.index("Due soon (1)") < todo.index("Tomorrow")
+    assert todo.index("Upcoming (1)") < todo.index("Next month") < todo.index("Done (1)") < todo.index("Handed in")
+    form = taro.get(f"/classes/{course}/assignments/submissions/new", params={"task": task_id(engine, "Tomorrow")}).text
+    assert f'value="{task_id(engine, "Tomorrow")}" selected' in form  # "Submit here" picks it already
+    assert 'id="todo-title"' not in admin.get(f"/classes/{course}", params={"tab": "assignments"}).text
+
+
+def test_exams_get_the_same_overview_and_to_do(engine, admin, taro, course):
+    post_task(admin, course, kinds="exams", title="Midterm quiz on valuation methods and peer multiples", hours=-5)
+    tab = taro.get(f"/classes/{course}", params={"tab": "exams"}).text
+    assert "Submission overview" in tab and "1 missing" in tab and "Overdue (1)" in tab
+    assert '<span data-marquee class="marquee w-36"><span>Midterm quiz' in tab  # long titles slide

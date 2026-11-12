@@ -115,6 +115,9 @@ class Course(SQLModel, table=True):
     # Classes from before these existed get True, i.e. all three tabs.
     has_exams: bool = True
     has_agents: bool = True
+    # A shared Google Drive folder for the class's documents (Ngoc): shown in a
+    # "Documents" tab. None = no such tab.
+    documents_url: str | None = None
     created_by: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=utc_now)
 

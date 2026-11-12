@@ -1,0 +1,84 @@
+{# Ngoc's suggestions (progress.py), on the Assignments and Exams tabs (long
+   titles slide, like agent names; ui.js):
+   - To do: the viewer's own tasks by deadline (students in the class).
+   - Submission overview: every student x every task, late and missing in
+     red (members). A submission counts when it's linked to the task. #}
+{% set noun = "assignment" if kind == "assignment" else "exam" %}
+{% if todo %}
+<section class="card" aria-labelledby="todo-title">
+  <div class="card-body gap-3">
+    <h2 id="todo-title" class="card-title">To do</h2>
+    {% set any_open = todo.overdue or todo.soon or todo.upcoming %}
+    {% if not any_open and not todo.done %}<p class="text-sm text-base-content/70">No {{ noun }}s posted yet.</p>{% endif %}
+    {% for key, label in [("overdue", "Overdue"), ("soon", "Due soon"), ("upcoming", "Upcoming")] if todo[key] %}
+    <div class="space-y-1.5">
+      <h3 class="todo-heading todo-{{ key }}">{{ label }} ({{ todo[key] | length }})</h3>
+      <ul class="space-y-1.5">
+        {% for item in todo[key] %}
+        <li class="todo-row todo-row-{{ key }}">
+          <span data-marquee class="marquee min-w-0 font-semibold" title="{{ mask(item.task.title) }}"><span>{{ mask(item.task.title) }}</span></span>
+          <span class="text-xs text-base-content/70">Due {{ item.task.due_at | jst }}</span>
+          <span class="text-xs font-semibold {{ 'text-error' if key == 'overdue' }}">{{ item.task.due_at | relative }}</span>
+          <button type="button" class="btn btn-primary btn-xs" hx-get="/classes/{{ course.id }}/{{ tab }}/submissions/new?task={{ item.task.id }}"
+                  hx-target="#modal">Submit here</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+    {% if todo.done %}
+    <details class="space-y-1.5">
+      <summary class="todo-heading todo-done cursor-pointer">Done ({{ todo.done | length }})</summary>
+      <ul class="space-y-1.5 pt-1.5">
+        {% for item in todo.done %}
+        <li class="todo-row">
+          <span data-marquee class="marquee min-w-0" title="{{ mask(item.task.title) }}"><span>{{ mask(item.task.title) }}</span></span>
+          <span class="text-xs text-base-content/70">Was due {{ item.task.due_at | jst }}</span>
+          <span class="badge badge-sm {{ 'sub-late' if item.status == 'late' else 'sub-on_time' }}">{{ "Submitted late" if item.status == "late" else "Submitted" }}</span>
+          <span></span>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if grid and grid.tasks and grid.rows %}
+<section class="card" aria-labelledby="grid-title">
+  <div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="grid-title" class="card-title">Submission overview</h2>
+      <p class="flex flex-wrap gap-2 text-xs">
+        <span class="badge badge-sm sub-on_time">{{ grid.totals.on_time }} on time</span>
+        <span class="badge badge-sm sub-late">{{ grid.totals.late }} late</span>
+        <span class="badge badge-sm sub-missing">{{ grid.totals.missing }} missing</span>
+      </p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="sub-grid">
+        <thead><tr><th scope="col">Student</th>
+          {% for task in grid.tasks %}
+          <th scope="col" title="{{ mask(task.title) }} · due {{ task.due_at | jst }}">
+            <span data-marquee class="marquee w-36"><span>{{ mask(task.title) }}</span></span>
+            <span class="block text-[0.65rem] font-normal text-base-content/70">{{ "due " ~ (task.due_at | relative) }}</span>
+          </th>
+          {% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for row in grid.rows %}
+          <tr class="{{ 'sub-flagged' if row.flagged }}">
+            <th scope="row" class="truncate">{{ who(row.student) }}{% if row.student.id == viewer.id %} <span class="badge badge-secondary badge-xs">You</span>{% endif %}</th>
+            {% for status in row.cells %}
+            <td><span class="badge badge-sm sub-{{ status }}">{{ {"on_time": "On time", "late": "Late", "missing": "Missing", "pending": "—"}[status] }}</span></td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-base-content/70">A submission counts once it's linked to the {{ noun }} on the submit form. Late and missing rows are highlighted after the deadline.</p>
+  </div>
+</section>
+{% endif %}

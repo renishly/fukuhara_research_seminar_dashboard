@@ -102,6 +102,15 @@ def drive_preview_url(url: str | None) -> str | None:
 
 templates.env.globals["drive_preview_url"] = drive_preview_url
 
+DRIVE_FOLDER = re.compile(r"^https://drive\.google\.com/(?:drive/(?:u/\d+/)?folders/|open\?id=)([\w-]{10,})")
+
+
+def drive_folder_embed(url: str | None) -> str | None:
+    """Google's embeddable list view of a shared Drive folder link, or None if
+    it isn't one. Only the folder's id is taken from the link."""
+    match = DRIVE_FOLDER.match((url or "").strip())
+    return f"https://drive.google.com/embeddedfolderview?id={match.group(1)}#list" if match else None
+
 
 def csv_table_page(raw: bytes, filename: str) -> str:
     """A CSV or TSV file as an HTML table (every cell escaped), sortable by

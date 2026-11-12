@@ -933,6 +933,34 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   font-size: 0.75rem;
 }
 
+/* Ngoc's to-do list and submission overview (partials/progress.html). */
+.todo-heading { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.todo-overdue { color: var(--red); }
+.todo-soon { color: #9a6700; }
+.todo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.6rem;
+  background: rgb(255 255 255 / 0.6);
+  border: 1px solid rgb(11 31 58 / 0.2);
+}
+.todo-row-overdue { border-color: var(--red); background: #fde4e2; }
+.todo-row-soon { border-color: var(--amber); }
+@media (max-width: 40rem) {
+  .todo-row { grid-template-columns: minmax(0, 1fr) auto; }
+}
+.sub-grid { border-collapse: collapse; font-size: 0.8125rem; }
+.sub-grid th, .sub-grid td { padding: 0.3rem 0.6rem; border-bottom: 1px solid rgb(11 31 58 / 0.12); text-align: left; }
+.sub-grid thead th { vertical-align: bottom; font-weight: 600; }
+.sub-grid tbody th { position: sticky; left: 0; background: var(--card); font-weight: 600; max-width: 12rem; }
+.sub-grid tr.sub-flagged > * { background: #fde4e2; }
+.sub-on_time { background: #dcf3e3; color: var(--ink); }
+.sub-late { background: #ffffff; color: var(--red); border-color: var(--red); font-weight: 700; }
+.sub-missing { background: var(--red); color: #ffffff; border-color: var(--red); font-weight: 700; }
+.sub-pending { background: transparent; color: rgb(11 31 58 / 0.5); border-color: transparent; }
+
 /* "This week" on an agent card: what changed in the last 7 days. */
 .card-week {
   font-size: 0.75rem;

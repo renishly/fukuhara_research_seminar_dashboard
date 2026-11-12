@@ -86,6 +86,15 @@
     <p class="label whitespace-normal">Switching a tab off later only hides it: its exams, submissions and agents are kept, and come back if you switch it on again.</p>
   </fieldset>
 
+  <fieldset class="fieldset">
+    <legend class="fieldset-legend">Documents (optional)</legend>
+    <input type="url" name="documents_url" value="{{ v.documents_url }}" maxlength="500" class="input w-full"
+           placeholder="https://drive.google.com/drive/folders/...">
+    <p class="label whitespace-normal">A shared Google Drive folder for the class's documents (instructions, reference
+      papers, rules...). Members see it in a Documents tab. Add files in Google Drive; the tab shows what the folder's
+      Google sharing allows ("Anyone with the link" works for everyone).</p>
+  </fieldset>
+
   <div class="grid gap-4 md:grid-cols-2">
     <fieldset class="fieldset">
       <legend class="fieldset-legend">Enrolled</legend>

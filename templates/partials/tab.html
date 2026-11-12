@@ -6,7 +6,7 @@
      a small "My dashboard" link to their own agents. #}
   <div class="flex justify-center">
     <div class="class-tabs" role="tablist">
-      {% for name in tabs if name != "skills" or viewer.is_member %}
+      {% for name in tabs if name not in ("skills", "documents") or viewer.is_member %}
       <span class="tab-slot">
         {% if name == "agents" and my_dashboard %}
         <a href="/classes/{{ course.id }}/agents/{{ viewer.id }}" class="my-dashboard link">My dashboard</a>
@@ -14,13 +14,27 @@
         <a role="tab" href="/classes/{{ course.id }}?tab={{ name }}" aria-selected="{{ 'true' if name == tab else 'false' }}"
            class="btn {{ 'btn-primary' if name == tab else '' }}"
            hx-get="/classes/{{ course.id }}/tab/{{ name }}" hx-target="#tab-area" hx-swap="outerHTML"
-           hx-push-url="/classes/{{ course.id }}?tab={{ name }}">{{ "Agent skills" if name == "skills" else name | capitalize }}</a>
+           hx-push-url="/classes/{{ course.id }}?tab={{ name }}">{{ {"skills": "Agent skills"}.get(name, name | capitalize) }}</a>
       </span>
       {% endfor %}
     </div>
   </div>
 
-  {% if tab == "skills" %}
+  {% if tab == "documents" %}
+  {# Ngoc's documents: the class's shared Google Drive folder, browsed in place. #}
+  {% if documents_embed %}
+  <section class="card">
+    <div class="card-body gap-3">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="card-title">Documents</h2>
+        <a href="{{ course.documents_url }}" target="_blank" rel="noopener noreferrer" class="link text-sm">Open in Google Drive &nearr;</a>
+      </div>
+      <iframe src="{{ documents_embed }}" title="Class documents (Google Drive)" class="h-[70vh] min-h-96 w-full border border-base-content/40 bg-white"></iframe>
+      <p class="text-xs text-base-content/70">Files are kept in Google Drive. If the folder looks empty, it may only be shared with certain Google accounts.</p>
+    </div>
+  </section>
+  {% else %}<p class="text-center text-base-content/70">Sign in as a member to see the documents.</p>{% endif %}
+  {% elif tab == "skills" %}
   {# The Agent Skills market, in its own tab (UX/UI team). #}
   {% if viewer.is_member %}{% include "partials/skills_market.html" %}
   {% else %}<p class="text-center text-base-content/70">Sign in as a member to see the agent skills.</p>{% endif %}
@@ -34,6 +48,7 @@
     {% include "partials/bar.html" %}
     <input type="hidden" id="bar-seen-{{ tab }}" name="seen" value="">
   </div>
+  {% include "partials/progress.html" %}
   {% endif %}
 
   {% if tab == "agents" %}

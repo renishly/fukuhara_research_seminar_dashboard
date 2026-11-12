@@ -39,6 +39,8 @@ from permissions import (
     visible_courses,
 )
 import market
+import progress
+from uploads import drive_folder_embed
 from routes.agent_tools import ago, states_for
 from routes.live_feed import feed_context, summary, sync_all
 from routes.common import (
@@ -165,14 +167,16 @@ def class_form_context(db: Session, course: Course | None, values: dict | None =
             start = today_jst().replace(day=1)
             values = {"title": "", "description": "", "start": start, "end": add_months(start, 5),
                       "enrolled_gens": set(), "enrolled_users": set(), "hidden_gens": set(),
-                      "hidden_users": set(), "hidden_from_guests": False, "has_exams": True, "has_agents": True}
+                      "hidden_users": set(), "hidden_from_guests": False, "has_exams": True, "has_agents": True,
+                      "documents_url": ""}
         else:
             values = {"title": course.title or "", "description": course.description,
                       "start": course.start_month, "end": course.end_month,
                       "enrolled_gens": enrolled_gen_ids(db, course), "enrolled_users": enrolled_user_ids(db, course),
                       "hidden_gens": hidden_gen_ids(db, course), "hidden_users": hidden_user_ids(db, course),
                       "hidden_from_guests": course.hidden_from_guests,
-                      "has_exams": course.has_exams, "has_agents": course.has_agents}
+                      "has_exams": course.has_exams, "has_agents": course.has_agents,
+                      "documents_url": course.documents_url or ""}
     gens = list(db.exec(select(Gen).order_by(Gen.number.desc())).all())
     gen_numbers = {gen.id: gen.number for gen in gens}
     students = sorted(
@@ -206,7 +210,7 @@ def save_links(db: Session, course: Course, values: dict) -> None:
 
 def read_class_form(db: Session, title, description, start_month, start_year, end_month, end_year,
                     enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
-                    has_exams, has_agents) -> tuple[dict, str | None]:
+                    has_exams, has_agents, documents_url="") -> tuple[dict, str | None]:
     """Tidy and check the class form. Returns (values, error or None)."""
     gen_ids = set(db.exec(select(Gen.id)).all())
     student_ids = set(db.exec(select(User.id).where(User.role == "student")).all())
@@ -220,6 +224,7 @@ def read_class_form(db: Session, title, description, start_month, start_year, en
         "hidden_users": {u for u in hidden_user if u in student_ids},
         "hidden_from_guests": hidden_from_guests,
         "has_exams": has_exams, "has_agents": has_agents,
+        "documents_url": (documents_url or "").strip(),
     }
     if error is None and len(values["title"]) > MAX_TITLE:
         error = f"The title can be at most {MAX_TITLE} characters."
@@ -229,6 +234,8 @@ def read_class_form(db: Session, title, description, start_month, start_year, en
         error = "Choose the months the class runs."
     if error is None and values["end"] < values["start"]:
         error = "The class can't end before it starts."
+    if error is None and values["documents_url"] and not drive_folder_embed(values["documents_url"]):
+        error = "For Documents, paste a Google Drive folder link (https://drive.google.com/drive/folders/...)."
     if values["start"] is None:
         values["start"] = today_jst().replace(day=1)
     if values["end"] is None:
@@ -253,18 +260,20 @@ def create_class(
     hidden_gen: list[int] = Form([]), hidden_user: list[int] = Form([]),
     hidden_from_guests: bool = Form(False),
     has_exams: bool = Form(False), has_agents: bool = Form(False),
+    documents_url: str = Form(""),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
 ):
     values, error = read_class_form(db, title, description, start_month, start_year, end_month, end_year,
                                     enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
-                                    has_exams, has_agents)
+                                    has_exams, has_agents, documents_url)
     if error:
         return render(request, db, viewer, "partials/class_form.html", **class_form_context(db, None, values, error))
     course = Course(title=values["title"] or None, description=values["description"],
                     start_month=values["start"], end_month=values["end"],
                     hidden_from_guests=values["hidden_from_guests"], has_exams=values["has_exams"],
-                    has_agents=values["has_agents"], created_by=viewer.id)
+                    has_agents=values["has_agents"], documents_url=values["documents_url"] or None,
+                    created_by=viewer.id)
     db.add(course)
     db.flush()
     save_links(db, course, values)
@@ -291,13 +300,14 @@ def edit_class(
     hidden_gen: list[int] = Form([]), hidden_user: list[int] = Form([]),
     hidden_from_guests: bool = Form(False),
     has_exams: bool = Form(False), has_agents: bool = Form(False),
+    documents_url: str = Form(""),
     viewer: Viewer = Depends(checked_admin),
     db: Session = Depends(get_session),
 ):
     course = get_course(db, viewer, course_id)
     values, error = read_class_form(db, title, description, start_month, start_year, end_month, end_year,
                                     enrolled_gen, enrolled_user, hidden_gen, hidden_user, hidden_from_guests,
-                                    has_exams, has_agents)
+                                    has_exams, has_agents, documents_url)
     if error:
         return render(request, db, viewer, "partials/class_form.html", **class_form_context(db, course, values, error))
     course.title = values["title"] or None
@@ -307,6 +317,7 @@ def edit_class(
     # Switching a tab off only hides it; its exams, submissions and agents are
     # kept and come back if it's switched on again.
     course.has_exams, course.has_agents = values["has_exams"], values["has_agents"]
+    course.documents_url = values["documents_url"] or None
     db.add(course)
     save_links(db, course, values)
     db.commit()
@@ -389,6 +400,8 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
     # A student in this class gets "My dashboard" above the Agents tab.
     context["my_dashboard"] = context["can_submit"] and "agents" in context["tabs"]
+    if tab == "documents":  # the class's shared Google Drive folder (members only)
+        return context | {"documents_embed": drive_folder_embed(course.documents_url) if viewer.is_member else None}
     if tab == "skills":  # the Agent Skills market (members only)
         if viewer.is_member:
             context |= {"skill_categories": market.categories(db), "skill_sorts": market.SORTS,
@@ -397,7 +410,13 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
     if tab == "agents":
         return context | agents_window(db, viewer, course)
     kind = kind_of(tab, course)
-    return context | {"kind": kind} | coursework_window(db, viewer, course, kind)
+    context |= {"kind": kind} | coursework_window(db, viewer, course, kind)
+    # Ngoc's to-do list (students in the class) and submission grid (members).
+    if context["can_submit"]:
+        context["todo"] = progress.todo_list(db, viewer, course, kind)
+    if viewer.is_member:
+        context["grid"] = progress.submission_grid(db, viewer, course, kind)
+    return context
 
 
 @router.get("/classes/{course_id}")
