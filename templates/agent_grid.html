@@ -172,14 +172,14 @@
           <li>Fill in the two values marked <strong>REPLACE THIS PLACEHOLDER</strong>, or set the environment variables <code>DASHBOARD_URL</code> and <code>DASHBOARD_API_KEY</code> (from <strong>Add Agent</strong>).</li>
           <li>Use <code>output(...)</code> to send results, and check in at a rhythm that suits the agent: <code>start_check_ins(every=30)</code> or, for a scheduled script, <code>check_in(every=3600)</code>.</li>
         </ol>
-        <pre class="max-h-72 overflow-auto bg-white/70 p-3 text-xs"><code>{{ connector_code }}</code></pre>
+        <pre class="max-h-72 overflow-auto bg-white/70 p-3 text-xs"><code hx-get="/connector/code/preview" hx-trigger="intersect once">Loading&hellip;</code></pre>
       </div>
       <div x-show="format === 'prompt'" x-cloak class="space-y-3 pt-4">
         <ol class="list-decimal space-y-1 pl-5 text-sm">
           <li>Download the prompt, and give it to an AI coding assistant in your agent's project.</li>
           <li>It will ask you for this dashboard's address and the agent's key before writing any code.</li>
         </ol>
-        <pre class="max-h-72 overflow-auto whitespace-pre-wrap bg-white/70 p-3 text-xs">{{ connector_prompt }}</pre>
+        <pre class="max-h-72 overflow-auto whitespace-pre-wrap bg-white/70 p-3 text-xs" hx-get="/connector/prompt/preview" hx-trigger="intersect once">Loading&hellip;</pre>
       </div>
       <p class="pt-3 text-xs text-base-content/70">This dashboard's address: <code class="select-all">{{ site_url }}</code>.
         Neither download contains an API key; the same files work with a local, Render or any other dashboard.</p>

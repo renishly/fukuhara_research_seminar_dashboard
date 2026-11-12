@@ -369,7 +369,7 @@ def coursework_window(db: Session, viewer: Viewer, course: Course, kind: str) ->
     return {"latest_task": tasks[0] if tasks else None, "groups": groups}
 
 
-def agents_window(db: Session, viewer: Viewer, course: Course) -> dict:
+def agents_window(db: Session, viewer: Viewer, course: Course, refresh: bool = False) -> dict:
     """The Agents tab: how many of each student's agents in this class are
     live, out of all of them, and when one last connected."""
     agents = list(db.exec(select(Agent).where(Agent.course_id == course.id)).all())
@@ -389,19 +389,22 @@ def agents_window(db: Session, viewer: Viewer, course: Course) -> dict:
             cell["live_count"] = sum(states[agent.id].key == "live" for agent in mine)
     context = {"groups": groups, "state_summary": summary(states, [agent.id for agent in shown])}
     if viewer.is_member:
-        context |= feed_context(db, shown, states, course.id)
+        if not refresh:  # the window's own 15-second refresh doesn't show the feed
+            context |= feed_context(db, shown, states, course.id)
     return context
 
 
-def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skill: int | None = None) -> dict:
+def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skill: int | None = None,
+                refresh: bool = False) -> dict:
     """One tab's content (404 for a tab this class doesn't have)."""
     if tab not in course_tabs(course):
         raise not_found()
     context = {"course": course, "tab": tab, "tabs": course_tabs(course), "can_manage": can_manage_classes(viewer),
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
     # The Agent skills tab's blue "!" while this member has new / updated skills to check.
+    # (Not for the 15-second refreshes of the bar and the student window, which don't show it.)
     context["skills_unseen"] = len(market.unseen(db, viewer, market.market_skills(db, course))) \
-        if viewer.is_member and course.has_agents else 0
+        if viewer.is_member and course.has_agents and not refresh else 0
     # A student in this class gets "My dashboard" above the Agents tab.
     context["my_dashboard"] = context["can_submit"] and "agents" in context["tabs"]
     if tab == "forecasts":  # Jimin's overview: every agent's forecast, this week vs last (members only)
@@ -421,7 +424,7 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
                         "organizer_status": market.schedule_message(db), "open_skill": open_skill}
         return context
     if tab == "agents":
-        return context | agents_window(db, viewer, course)
+        return context | agents_window(db, viewer, course, refresh)
     kind = kind_of(tab, course)
     context |= {"kind": kind} | coursework_window(db, viewer, course, kind)
     # Ngoc's to-do list (students in the class) and submission grid (members).
@@ -461,7 +464,7 @@ def bar_fragment(course_id: int, kinds: str, seen: str | None = None,
     """The bar again, every 15 seconds (204 when nothing changed)."""
     course = get_course(db, viewer, course_id)
     kind_of(kinds, course)  # only Assignments and (if switched on) Exams have a bar
-    content = render_text(db, viewer, "partials/bar.html", **tab_context(db, viewer, course, kinds))
+    content = render_text(db, viewer, "partials/bar.html", **tab_context(db, viewer, course, kinds, refresh=True))
     return poll_reply(content, seen, f"bar-seen-{kinds}")
 
 
@@ -470,6 +473,7 @@ def window_fragment(course_id: int, tab: str, seen: str | None = None,
                     viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     """The student window again, every 15 seconds (204 when nothing changed)."""
     course = get_course(db, viewer, course_id)
-    content = render_text(db, viewer, "partials/student_window.html", **tab_context(db, viewer, course, tab))
+    content = render_text(db, viewer, "partials/student_window.html",
+                          **tab_context(db, viewer, course, tab, refresh=True))
     return poll_reply(content, seen, f"window-seen-{tab}")
 

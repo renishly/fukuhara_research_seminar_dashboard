@@ -558,6 +558,10 @@ def fixed_categories(db: Session) -> dict[int, SkillCategory]:
     """The 10 fixed categories (number -> row), created or brought up to date.
     Categories from before (invented by the old organizer) are removed; their
     skills are filed again."""
+    existing = list(db.exec(select(SkillCategory)).all())
+    wanted = {(number, name, description) for number, name, description in FIXED}
+    if {(c.position, c.name, c.description) for c in existing} == wanted and len(existing) == len(FIXED):
+        return {c.position: c for c in existing}  # already right: nothing to write
     rows = {}
     for number, name, description in FIXED:
         rows[number] = upsert_category(db, name, description, number)

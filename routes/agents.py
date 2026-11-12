@@ -7,6 +7,7 @@ change, control or delete their agents, folders, pins, keys and Inbox files.
 Other members see everything read-only; guests see only the grid.
 """
 
+import html
 import math
 from urllib.parse import quote
 
@@ -272,8 +273,7 @@ def agent_grid_page(request: Request, course_id: int, student_id: int, page: int
     current = folder_for_grid(db, owner, folder) if viewer.is_member else None
     context = grid_context(db, viewer, course, owner, page, current) | sidebar_context(db, course, owner, current)
     if context["is_owner"]:
-        context |= {"site_url": site_url(request), "connector_code": connector_text(request, "code"),
-                    "connector_prompt": connector_text(request, "prompt")}
+        context |= {"site_url": site_url(request)}  # the connector's text loads when it's opened
     return render(request, db, viewer, "agent_grid.html", owner_gen=student_label(db, owner), **context)
 
 
@@ -288,6 +288,15 @@ def agent_grid_fragment(course_id: int, student_id: int, page: int = 1, folder: 
     content = render_text(db, viewer, "partials/agent_cards.html",
                           **grid_context(db, viewer, course, owner, page, current))
     return poll_reply(content, seen, "grid-seen")
+
+
+@router.get("/connector/{file_format}/preview")
+def preview_connector(request: Request, file_format: str, viewer: Viewer = Depends(require_member)):
+    """The connector's code or prompt as text for the "Implement connector" pop-up
+    (escaped), loaded only when it's opened."""
+    if file_format not in ("code", "prompt"):
+        raise not_found("Unknown connector format")
+    return HTMLResponse(html.escape(connector_text(request, file_format)))
 
 
 @router.get("/connector/{file_format}")

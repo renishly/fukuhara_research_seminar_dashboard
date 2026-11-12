@@ -79,20 +79,27 @@ def first_check_in_after(db: Session, agent: Agent, moment: datetime) -> datetim
     return as_utc(span.started_at) if span else None
 
 
-def sync(db: Session, agent: Agent, state: AgentState, now: datetime | None = None) -> None:
-    """Bring the agent's feed up to date with its current state. The caller commits."""
+def sync(db: Session, agent: Agent, state: AgentState, now: datetime | None = None) -> bool:
+    """Bring the agent's feed up to date with its current state. Returns True
+    if it changed anything (the caller commits)."""
     now = now or utc_now()
     if agent.feed_state is None:  # first seen: note it (a hidden "start" row, for the daily bars), no feed line
         agent.feed_state, agent.feed_state_at = state.key, now
         add_row(db, agent, now, "start", state.key, "first seen")
         db.add(agent)
-        return
+        return True
     before, since = agent.feed_state, as_utc(agent.feed_state_at or now)
     interval = check_in_interval(agent)
-    if before in ("live", "attention") and interval:
+    # Outages between page loads can only be found from check-ins made since the
+    # last look: with none, there's nothing to scan (no queries, no writes).
+    scanned = as_utc(agent.feed_scanned_at) if agent.feed_scanned_at else None
+    seen = as_utc(agent.last_seen_at) if agent.last_seen_at else None
+    changed = False
+    if before in ("live", "attention") and interval and seen and (scanned is None or seen > scanned):
         unseen_outages(db, agent, since, interval, now)
+        changed = True
     if state.key == before:
-        return
+        return changed
 
     at, message = now, ""
     seen = as_utc(agent.last_seen_at) if agent.last_seen_at else None
@@ -122,14 +129,19 @@ def sync(db: Session, agent: Agent, state: AgentState, now: datetime | None = No
     agent.feed_state, agent.feed_state_at = state.key, at
     db.add(agent)
     forget_old_rows(db, agent)
+    return True
 
 
 def sync_all(db: Session, agents: list[Agent], states: dict[int, AgentState], now: datetime | None = None) -> None:
     """sync() for a page's agents, then commit."""
     now = now or utc_now()
+    changed = False
     for agent in agents:
-        sync(db, agent, states[agent.id], now)
-    db.commit()
+        changed = sync(db, agent, states[agent.id], now) or changed
+    # Only save when something changed: saving makes every loaded agent stale,
+    # and each would then be read from the database again.
+    if changed:
+        db.commit()
 
 
 def note_new_data(db: Session, agent: Agent, old: RunStatus | None, new: RunStatus | None) -> None:
@@ -193,6 +205,23 @@ def categories(db: Session, agents: list[Agent], states: dict[int, AgentState], 
     typing = sorted((a for a in agents if states[a.id].key in ("live", "attention") and next_run(a)
                      and next_run(a) <= now), key=next_run)
     result = []
+    # Every category's latest agents in two queries (not one per agent per category):
+    # how many changes each agent has per state, and the newest rows to read the messages from.
+    counts: dict[tuple[str, int], int] = {}
+    newest: dict[tuple[str, int], tuple[datetime, StateChange]] = {}
+    if ids:
+        for state, agent_id, count in db.exec(
+                select(StateChange.state, StateChange.agent_id, func.count(StateChange.id))
+                .where(StateChange.agent_id.in_(ids), StateChange.kind != "start")
+                .group_by(StateChange.state, StateChange.agent_id)).all():
+            counts[(state, agent_id)] = count
+        number = func.row_number().over(partition_by=(StateChange.state, StateChange.agent_id),
+                                        order_by=(StateChange.at.desc(), StateChange.id.desc()))
+        ranked = (select(StateChange.id, number.label("n"))
+                  .where(StateChange.agent_id.in_(ids), StateChange.kind != "start").subquery())
+        latest_ids = [row_id for row_id, n in db.exec(select(ranked.c.id, ranked.c.n)).all() if n == 1]
+        for row in db.exec(select(StateChange).where(StateChange.id.in_(latest_ids))).all() if latest_ids else []:
+            newest[(row.state, row.agent_id)] = (as_utc(row.at), row)
     for key, label in CATEGORIES:
         entries = []
         if key == "live":
@@ -201,18 +230,12 @@ def categories(db: Session, agents: list[Agent], states: dict[int, AgentState], 
                 entries.append({"agent": agent, "owner": owners.get(agent.owner_id), "state": states[agent.id],
                                 "message": "checked in", "count": 1, "countdown": iso(next_run(agent))})
         else:
-            latest = db.exec(select(StateChange.agent_id, func.count(StateChange.id), func.max(StateChange.at))
-                             .where(StateChange.agent_id.in_(ids), StateChange.state == key,
-                                    StateChange.kind != "start")
-                             .group_by(StateChange.agent_id).order_by(func.max(StateChange.at).desc())
-                             .limit(BUBBLE_AGENTS)).all() if ids else []
-            for agent_id, count, _ in latest:
-                row = db.exec(select(StateChange).where(StateChange.agent_id == agent_id, StateChange.state == key,
-                                                        StateChange.kind != "start")
-                              .order_by(StateChange.at.desc(), StateChange.id.desc()).limit(1)).one()
-                agent = by_id[agent_id]
-                entries.append({"agent": agent, "owner": owners.get(agent.owner_id), "state": states.get(agent_id),
-                                "message": row.message, "count": count, "countdown": None})
+            mine = sorted(((at, row) for (state, _), (at, row) in newest.items() if state == key),
+                          key=lambda pair: pair[0], reverse=True)[:BUBBLE_AGENTS]
+            for _, row in mine:
+                agent = by_id[row.agent_id]
+                entries.append({"agent": agent, "owner": owners.get(agent.owner_id), "state": states.get(agent.id),
+                                "message": row.message, "count": counts.get((key, agent.id), 1), "countdown": None})
         chip = {"key": key, "label": label, "entries": entries, "countdown": None,
                 "typing": [] if key == "paused" else [{"agent": a, "owner": owners.get(a.owner_id),
                                                        "state": states[a.id]} for a in typing]}
