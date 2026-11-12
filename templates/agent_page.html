@@ -14,6 +14,8 @@
 
   <div class="{{ 'lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-8' if is_owner }}">
     <div class="min-w-0 space-y-8">
+      {% include "partials/run_steps.html" %}
+      {% include "partials/checkin_graph.html" %}
       {# Monitors (datapoints kept up to date) and Outputs (one-off results). #}
       {% with f=monitors_feed %}{% include "partials/feed.html" %}{% endwith %}
       {% with f=outputs_feed %}{% include "partials/feed.html" %}{% endwith %}

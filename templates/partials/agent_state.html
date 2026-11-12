@@ -1,0 +1,91 @@
+{# An agent's state (see agent_tools.agent_state()): Live, Needs attention,
+   Offline or Paused, always as a word as well as a colour, so it reads in
+   black and white and for colour-blind viewers. Plus its rhythm tag (Daily...).
+
+   pill(state, id=None, oob=False): with an id, the Start/Pause replies can
+   swap it in place ("out of band") so it changes straight away. #}
+
+{# detail: members only; puts the why line in the hover text. #}
+{% macro pill(state, size="badge-sm", id=None, oob=False, detail=False) -%}
+<span {% if id %}id="{{ id }}"{% endif %} {% if oob %}hx-swap-oob="true"{% endif %}
+      class="state-pill state-{{ state.key }} badge {{ size }}"
+      title="{{ state.label }}{% if detail and state.why %}: {{ state.why }}{% endif %}">{{ state.label }}</span>
+{%- endmacro %}
+
+{% macro rhythm(state, size="badge-sm") -%}
+{% if state.rhythm %}<span class="rhythm-tag rhythm-{{ state.rhythm | lower | replace('-', '') }} badge {{ size }}" title="Checks in every {{ state.every }}">{{ state.rhythm }}</span>{% endif %}
+{%- endmacro %}
+
+{# Classes that colour an agent's name like its rhythm tag (none if unspecified). #}
+{% macro name_colour(state) -%}
+{% if state.rhythm %}rhythm-name rhythm-{{ state.rhythm | lower | replace('-', '') }}{% endif %}
+{%- endmacro %}
+
+{# The two small lines under a member's view of an agent: when, and why. #}
+{% macro lines(state) -%}
+<p class="font-mono text-xs text-base-content/70">{{ state.when }}</p>
+{% if state.why %}<p class="text-xs break-words">{{ state.why }}</p>{% endif %}
+{%- endmacro %}
+
+{# For the class's Agents tab: how many of a student's agents are live, out of
+   all of them ("1/3 live"). Green when all are live, amber when some are,
+   red when none are. #}
+{% macro live_fraction(live, total, size="badge-xs") -%}
+{% set key = "live" if live == total else ("attention" if live else "offline") %}
+<span class="state-pill state-{{ key }} badge {{ size }}" title="{{ live }} of {{ total }} agent{{ 's' if total != 1 }} live">{{ live }}/{{ total }} live</span>
+{%- endmacro %}
+
+{# How a student's agents split by rhythm (agent_tools.rhythm_mix()): one bar,
+   each rhythm its own block in its tag's colour. The filled part is agents
+   running correctly; the see-through, hatched part is agents that are offline
+   or need attention. Each block has one centred label: its count, plus a ⚠
+   if any aren't running. The legend under it, laid out in a row, gives
+   names, counts and problems, so nothing is told by colour alone. #}
+{% macro problem_words(part) -%}
+{{ part.problems }} not running correctly ({% if part.offline %}{{ part.offline }} offline{% endif %}{% if part.offline and part.attention %}, {% endif %}{% if part.attention %}{{ part.attention }} need{{ "s" if part.attention == 1 }} attention{% endif %})
+{%- endmacro %}
+
+{% macro rhythm_bar(mix, total) -%}
+<figure class="rhythm-mix space-y-3" aria-label="Check-in rhythms">
+  <figcaption class="text-sm font-semibold">Check-in rhythms <span class="font-normal text-base-content/70">&middot; {{ total }} agent{{ "s" if total != 1 }}</span></figcaption>
+  <div class="rhythm-bar" role="img"
+       aria-label="{% for part in mix %}{{ part.tag }}: {{ part.count }}{% if part.problems %}, {{ problem_words(part) }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}">
+    {% for part in mix %}
+    <span class="rhythm-seg rhythm-{{ part.key }}" style="flex-grow: {{ part.count }}"
+          title="{{ part.tag }}: {{ part.count }} of {{ total }} ({{ part.percent }}%){% if part.problems %}; {{ problem_words(part) }}{% endif %}">
+      {% if part.ok %}<span class="rhythm-ok" style="flex-grow: {{ part.ok }}"></span>{% endif %}
+      {% if part.problems %}<span class="rhythm-bad" style="flex-grow: {{ part.problems }}"></span>{% endif %}
+      {# One label for the whole section, centred: its count, and a ⚠ if any aren't running. #}
+      {% if part.percent >= 8 or (part.problems and part.percent >= 4) %}
+      <span class="rhythm-label">{% if part.percent >= 8 %}{{ part.count }}{% endif %}{% if part.problems %}<span class="rhythm-warn" aria-hidden="true">&#9888;</span>{% endif %}</span>
+      {% endif %}
+    </span>
+    {% endfor %}
+  </div>
+  <ul class="rhythm-legend">
+    {% for part in mix %}
+    <li>
+      <span class="rhythm-swatch rhythm-{{ part.key }}" aria-hidden="true"></span>
+      <span>{{ part.tag }}</span>
+      <span class="rhythm-figure">{{ part.count }} <span class="text-base-content/60">({{ part.percent }}%)</span></span>
+      {% if part.problems %}<span class="rhythm-problems rhythm-{{ part.key }}" title="{{ problem_words(part) }}"><span class="rhythm-warn" aria-hidden="true">&#9888;</span>{{ part.problems }} not running</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</figure>
+{%- endmacro %}
+
+{# The summary line at the top of the Agents pages: how many agents are in each
+   state (live_feed.summary()). States with none are dimmed, not hidden, so the
+   line keeps its shape. #}
+{% macro summary_line(rows) -%}
+<div class="flex flex-wrap items-center gap-2" aria-label="Agent states">
+  <span class="text-sm font-semibold">Agents</span>
+  {% for key, words, count in rows %}
+  <span class="state-pill state-{{ key }} badge {{ 'opacity-50' if not count }}">{{ count }} {{ "needs attention" if key == "attention" and count == 1 else words }}</span>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{# The pill alone, for the Start/Pause replies (rendered with oob=True). #}
+{% if standalone %}{{ pill(state, size="", id="agent-state", oob=oob, detail=True) }}{% endif %}

@@ -5,6 +5,7 @@
    forms send with HTMX, and the server replies with a fresh copy of this whole
    section (#agent-header); settings_open keeps the pop-up open, so the owner
    can carry on editing. Closing it clears any key that was shown. #}
+{% import "partials/agent_state.html" as states %}
 <section id="agent-header" class="space-y-3"
          x-data="{
            settingsOpen: {{ 'true' if settings_open else 'false' }},
@@ -21,7 +22,7 @@
          @keydown.escape.window="closeSettings()">
 
   <div class="flex flex-wrap items-center gap-2">
-    <h1 class="page-title break-all text-3xl font-bold tracking-tight">{{ agent.name }}</h1>
+    <h1 class="page-title break-all text-3xl font-bold tracking-tight {{ states.name_colour(state) }}">{{ agent.name }}</h1>
     {% if is_owner %}
     <button type="button" class="btn btn-ghost btn-sm btn-circle" @click="settingsOpen = true" aria-label="Agent settings" title="Agent settings">
       {# Gear icon (Heroicons "cog-6-tooth", MIT licence) #}
@@ -31,15 +32,10 @@
       </svg>
     </button>
     {% endif %}
-    {% if online %}
-    <span class="live-dot badge badge-outline" title="Checked in on schedule ({{ check_in }})">online</span>
-    {% elif agent.last_seen_at %}
-    <span class="badge badge-ghost" title="No check-in for longer than expected ({{ check_in }})">offline</span>
-    {% else %}
-    <span class="badge badge-ghost">never connected</span>
-    {% endif %}
-    {% include "partials/run_state.html" %}
+    {{ states.pill(state, size="", id="agent-state", detail=True) }}
+    {{ states.rhythm(state, size="") }}
   </div>
+  <div>{{ states.lines(state) }}</div>
 
   {% if agent.description %}<p class="max-w-prose whitespace-pre-line break-words">{{ agent.description }}</p>{% endif %}
 
@@ -54,8 +50,11 @@
   <p class="text-sm text-base-content/70">
     Added {{ agent.created_at | jst }} &middot;
     {% if agent.last_seen_at %}last seen {{ agent.last_seen_at | jst }}{% else %}hasn't connected yet{% endif %} &middot;
-    <span title="Set by the agent itself. It shows as online while it keeps to this rhythm.">checks in {{ check_in }}{% if not agent.check_in_seconds %} (default){% endif %}</span>
+    <span title="Set by the agent itself or on this page (this page wins). It shows as Live while it keeps to this rhythm.">checks in {{ check_in }}{% if state.rhythm %} ({{ state.rhythm }}){% endif %}</span>
   </p>
+  {% if interval_mismatch and viewer.is_member %}
+  <div role="alert" class="alert alert-warning alert-soft text-sm">&#9888; The agent reports checking in every {{ agent_interval }}; the owner's setting ({{ check_in }}) is used instead.</div>
+  {% endif %}
 
   {% if is_owner %}
   <!-- Agent settings. The server also writes modal-open into class when
@@ -84,6 +83,23 @@
         </form>
         {% if description_error %}<p class="text-error text-sm">{{ description_error }}</p>{% endif %}
         <p class="text-xs text-base-content/70">Shown under the name, and readable by the agents in this class. Save it empty to remove it.</p>
+      </section>
+
+      <section class="space-y-2">
+        <h4 class="font-semibold">Check-in interval</h4>
+        <form class="flex flex-wrap gap-2" hx-post="/agents/{{ agent.id }}/interval" hx-target="#agent-header" hx-swap="outerHTML">
+          <input type="number" name="amount" value="{{ owner_interval[0] }}" min="0" step="any" placeholder="e.g. 24"
+                 class="input w-28" aria-label="Interval">
+          <select name="unit" class="select w-auto" aria-label="Unit">
+            {% for unit in ["minutes", "hours", "days"] %}<option value="{{ unit }}" {{ "selected" if owner_interval[1] == unit }}>{{ unit }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn btn-primary">Save interval</button>
+        </form>
+        {% if interval_error %}<p class="text-error text-sm">{{ interval_error }}</p>{% endif %}
+        <p class="text-xs text-base-content/70">How often the agent checks in (1 minute to 35 days). It gives the agent its
+          tag (Real-time, Hourly, Daily, Weekly, Monthly) and decides when it shows as offline.
+          {% if agent_interval %}The agent itself reports every {{ agent_interval }}; your setting wins.{% else %}The agent hasn't reported one.{% endif %}
+          Save it empty to use the agent's own value.</p>
       </section>
 
       <section class="space-y-2">

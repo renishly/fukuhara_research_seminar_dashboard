@@ -1,0 +1,71 @@
+{# The "Check-in activity" bar graph on an agent's page (checkins.activity()):
+   the latest 12 intervals, left to right up to now. One bar per check-in, as
+   tall as the silence before it (in intervals; dashed lines at 1x "expected"
+   and 1.5x "late"): green on time, orange late. Each expected check-in that
+   never came is a red ✕ on the axis, with no bar. A hollow orange bar at
+   "now" means it's late right now; hatched grey is before its history began.
+   Everything is placed by percentages, so it stretches with the page;
+   hovering any mark says what it is. #}
+{% set a = activity %}
+<section class="card" aria-labelledby="checkin-graph-title">
+  <div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <h2 id="checkin-graph-title" class="card-title">Check-in activity</h2>
+      {% if a %}
+      <p class="text-sm">
+        <span class="text-base-content/70">Last 12 intervals ({{ a.window_text }})</span> &middot;
+        <strong>{{ a.on_time_count }} on time</strong> &middot;
+        <strong>{{ a.late_count }} late</strong> &middot;
+        <strong>{{ a.missed_count }} missed</strong>
+      </p>
+      {% endif %}
+    </div>
+
+    {% if not a %}
+    {% if is_owner %}
+    <p class="text-sm text-base-content/70">Set a check-in interval (with the gear above, or with <code>check_in(every=...)</code>)
+      to see this agent's check-in activity: lateness can't be judged without one.</p>
+    {% else %}
+    <p class="text-sm text-base-content/70">This agent has no check-in interval yet, so its check-in activity can't be judged.</p>
+    {% endif %}
+    {% else %}
+    {% macro pct(value) %}{{ '%.3f' % (value * 100) }}%{% endmacro %}
+    <div class="ci-graph" role="img"
+         aria-label="Check-ins over the last {{ a.window_text }}: {{ a.on_time_count }} on time, {{ a.late_count }} late, {{ a.missed_count }} missed.">
+      <p class="ci-caption">Bar height: time since the check-in before, in intervals</p>
+      <div class="ci-plot">
+        {% if a.unrecorded_until > 0 %}
+        <div class="ci-unrecorded" style="left: 0; width: {{ pct(a.unrecorded_until) }}" title="Before the check-in history began"></div>
+        {% endif %}
+        {% for x, label in a.ticks %}<div class="ci-grid" style="left: {{ pct(x) }}"></div>{% endfor %}
+        {% for height, label in a.guides %}
+        <div class="ci-guide" style="bottom: {{ pct(height) }}"><span>{{ '%g' % (height * a.y_max) }}&times; {{ label }}</span></div>
+        {% endfor %}
+        {% for b in a.bars %}
+        <div class="ci-bar ci-{{ b.kind }}{{ ' ci-cut' if b.cut }}" style="left: {{ pct(b.x) }}; height: {{ pct(b.height) }}"
+             title="{{ b.text }}{{ ' (cut off: taller than the graph)' if b.cut }}"></div>
+        {% endfor %}
+        {% if a.waiting %}
+        <div class="ci-bar ci-waiting{{ ' ci-cut' if a.waiting.cut }}" style="left: 100%; height: {{ pct(a.waiting.height) }}"
+             title="{{ a.waiting.text }}"></div>
+        {% endif %}
+        {% for x, text in a.misses %}
+        <div class="ci-miss" style="left: {{ pct(x) }}" title="{{ text }}">&#10005;</div>
+        {% endfor %}
+      </div>
+      <div class="ci-axis" aria-hidden="true">
+        {% for x, label in a.ticks %}{% if label %}
+        <span class="{{ 'ci-first' if loop.first else ('ci-last' if loop.last else '') }}" style="left: {{ pct(x) }}">{{ label }}</span>
+        {% endif %}{% endfor %}
+      </div>
+    </div>
+    <ul class="ci-legend">
+      <li><span class="ci-key ci-ok"></span>On time</li>
+      <li><span class="ci-key ci-late"></span>Late (over 1.5&times; the interval)</li>
+      <li><span class="ci-miss-key">&#10005;</span>Missed check-in (no bar)</li>
+      {% if a.waiting %}<li><span class="ci-key ci-waiting"></span>Late right now, still waiting</li>{% endif %}
+      {% if a.unrecorded_until > 0 %}<li><span class="ci-key ci-unrecorded"></span>Not recorded yet</li>{% endif %}
+    </ul>
+    {% endif %}
+  </div>
+</section>

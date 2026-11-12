@@ -1,0 +1,22 @@
+{# The live feed panel (routes/live_feed.py), on the class's Agents tab only.
+   Members only. On top, the daily bars: how many agents were due each day,
+   split by state (click a slice for those agents). Below, five categories
+   (Live, Needs attention, Offline, Paused, New data), each a chip with a
+   chat-style bubble of the latest agents with that activity. The body
+   reloads every 15 seconds; countdowns tick every second (ui.js). #}
+<section class="card" aria-labelledby="live-feed-title">
+  <div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-x-3">
+      <h2 id="live-feed-title" class="card-title">Live feed</h2>
+      <p class="text-xs text-base-content/70">All agents in this class (Japan time)</p>
+    </div>
+    {# "transition:true": lines slide to their new places when the body reloads
+       (View Transitions, where the browser has them). ui.js also reloads it
+       when a countdown runs out, and every 5 s while someone is "typing". #}
+    <div id="live-feed-body" hx-get="{{ feed_url }}" hx-swap="innerHTML transition:true" hx-include="#feed-seen"
+         hx-trigger="every 15s [document.visibilityState === 'visible'], lf-refresh">
+      {% include "partials/live_feed_body.html" %}
+      <input type="hidden" id="feed-seen" name="seen" value="">
+    </div>
+  </div>
+</section>

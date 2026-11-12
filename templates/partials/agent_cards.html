@@ -3,9 +3,11 @@
    Guests see names, online status and descriptions only. #}
 {% import "partials/output_macros.html" as show %}
 {% import "partials/icons.html" as icon %}
+{% import "partials/agent_state.html" as states %}
 {% set folder_param = "&folder=%d" % folder.id if folder else "" %}
 {% set base = "/classes/%d/agents/%d" % (course.id, owner.id) %}
 
+{% if rhythm_mix %}<div class="mb-5">{{ states.rhythm_bar(rhythm_mix, total_agents) }}</div>{% endif %}
 <p class="mb-4 text-sm text-base-content/70">
   {{ total_agents }} agent{{ "s" if total_agents != 1 }}{% if total_pages > 1 %} &middot; page {{ page }} of {{ total_pages }}{% endif %}
 </p>
@@ -20,23 +22,23 @@
   <div class="card">
   {% endif %}
     <div class="card-body gap-3">
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {# Offline: the top of the card (name and tags, not the check-in lines) is
+         shaded with red diagonal lines, with a big warning sign by the name. #}
+      {% set down = cell.state.key == "offline" %}
+      {# One line: the name takes the room left by the tags, and slides if it's too long (ui.js). #}
+      <div class="flex flex-nowrap items-center gap-x-3 {{ 'card-down' if down }}">
+        {% if down %}<span class="card-warn" role="img" aria-label="Not working" title="Offline: {{ cell.state.why if viewer.is_member else 'not working' }}">!</span>{% endif %}
         {% if viewer.is_member %}
-        <a href="/agents/{{ agent.id }}" title="{{ agent.name }}" class="card-title line-clamp-2 min-w-0 max-w-full break-words">{{ agent.name }}</a>
+        <a href="/agents/{{ agent.id }}" title="{{ agent.name }}" data-marquee class="card-title marquee min-w-0 flex-1 {{ states.name_colour(cell.state) }}"><span>{{ agent.name }}</span></a>
         {% else %}
-        <span class="card-title line-clamp-2 min-w-0 max-w-full break-words">{{ mask(agent.name) }}</span>
+        <span title="{{ mask(agent.name) }}" data-marquee class="card-title marquee min-w-0 flex-1 {{ states.name_colour(cell.state) }}"><span>{{ mask(agent.name) }}</span></span>
         {% endif %}
-        <div class="ml-auto flex shrink-0 items-center gap-1">
-          {% if agent.paused %}<span class="badge badge-outline badge-sm">paused</span>{% endif %}
-          {% if cell.online %}
-          <span class="live-dot badge badge-outline badge-sm">online</span>
-          {% elif agent.last_seen_at %}
-          <span class="badge badge-ghost badge-sm">offline</span>
-          {% else %}
-          <span class="badge badge-ghost badge-sm">never connected</span>
-          {% endif %}
+        <div class="flex shrink-0 items-center gap-1">
+          {{ states.rhythm(cell.state) }}
+          {{ states.pill(cell.state, detail=viewer.is_member) }}
         </div>
       </div>
+      {% if viewer.is_member %}<div class="-mt-2">{{ states.lines(cell.state) }}</div>{% endif %}
 
       {% if viewer.is_guest %}
         {% if agent.description %}<p class="line-clamp-4 whitespace-pre-line text-sm break-words">{{ mask(agent.description) }}</p>{% endif %}

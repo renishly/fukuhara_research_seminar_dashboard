@@ -31,15 +31,19 @@ from db import (
     as_utc,
     get_session,
 )
+import run_status
+from routes import live_feed
 from routes.agent_tools import (
     LATE_NOTE,
     MAX_CHECK_IN,
     MIN_CHECK_IN,
+    state_of,
     check_in_interval,
     clean_category,
     clean_link,
     describe_content,
     file_details,
+    get_monitor,
     folders_of,
     is_online,
     log_activity,
@@ -202,12 +206,18 @@ def put_monitor(monitor_in: MonitorIn, agent: Agent = Depends(require_agent), db
     """set_monitor(content, name): replace the monitor called `name` (or create it).
     Content null removes it."""
     name = clean_category(monitor_in.name, "name")
+    before = run_status.parse(get_monitor(db, agent.id, name)) if name == run_status.RUN_STATUS else None
     if monitor_in.content is None:
         applied = set_monitor(db, agent, name, None, None, made_at=monitor_in.created_at)
     else:
         kind, value = describe_content(monitor_in.content)
         applied = set_monitor(db, agent, name, kind, value, made_at=monitor_in.created_at)
     trim_history(db, agent.id)
+    if name == run_status.RUN_STATUS and applied:
+        # Its Run status changed: the live feed notes new data, and any change
+        # of state (needs attention / recovered) right away.
+        live_feed.note_new_data(db, agent, before, run_status.parse(get_monitor(db, agent.id, name)))
+        live_feed.sync(db, agent, state_of(db, agent))
     db.commit()
     return {"name": name, "applied": applied}
 
@@ -414,11 +424,13 @@ def agent_info(db: Session, agent: Agent, caller: Agent) -> dict:
     """Everything one agent may know about another (never its key or its owner's Login ID)."""
     owner = db.get(User, agent.owner_id)
     gen = db.get(Gen, owner.gen_id) if owner and owner.gen_id else None
+    state = state_of(db, agent)
     return {
         "id": agent.id, "name": agent.name, "description": agent.description, "you": agent.id == caller.id,
         "owner": {"full_name": owner.full_name if owner else None, "gen": gen.number if gen else None},
         "folders": [folder.name for folder in folders_of(db, agent.id)],
         "online": is_online(agent), "paused": agent.paused, "accepts_messages": agent.accepts_messages,
+        "state": state.key, "rhythm": state.rhythm,
         "check_in_every": check_in_interval(agent), "created_at": iso(agent.created_at),
         "last_seen": iso(agent.last_seen_at),
         "monitors": [m.name for m in db.exec(select(Monitor).where(Monitor.agent_id == agent.id)

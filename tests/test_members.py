@@ -121,7 +121,7 @@ def test_grid_pages_hold_nine_cells_including_add_agent(make_person, create_clas
     # 9 agents fill the first page; the Add Agent card is the 10th cell, on page 2.
     assert "page 1 of 2" in first and "agent-8" in first and ADD_CARD not in first
     second = taro.get(f"/classes/{course}/agents/{taro.id}?page=2").text
-    assert "agent-0" not in second and ADD_CARD in second
+    assert 'title="agent-0" data-marquee' not in second and ADD_CARD in second  # its card (the live feed still lists it)
     # Other members see 9 agents on a single page (no Add Agent card for them).
     hanako = make_person("student", "hanako", gen=9)
     assert "page 1 of" not in hanako.get(f"/classes/{course}/agents/{taro.id}").text

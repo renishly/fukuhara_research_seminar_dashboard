@@ -29,6 +29,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 from sqlmodel import Session, delete, select
 
+from checkins import record_activity
 from db import Agent, LoginSession, User, as_utc, get_session, utc_now
 
 
@@ -451,6 +452,7 @@ def require_agent(
     if agent is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing or invalid API key")
     agent.last_seen_at = utc_now()
+    record_activity(db, agent, agent.last_seen_at)  # its check-in history, for the activity graph
     db.add(agent)
     db.commit()
     db.refresh(agent)

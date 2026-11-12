@@ -2,6 +2,7 @@
    one fixed-size cell per enrolled student. The cells (.sw-content) sit in the
    middle of a larger plane (.sw-canvas) with empty space ("leeway") on every
    side, so the window can be moved around in two directions (x and y). #}
+{% import "partials/agent_state.html" as states %}
 {% if groups %}
 <div class="sw-canvas">
 <div class="sw-content">
@@ -17,14 +18,15 @@
         <span class="flex items-center gap-2">
           <strong class="min-w-0 flex-1 truncate">{{ who(student) }}</strong>
           {% if viewer.id == student.id %}<span class="badge badge-secondary badge-xs">You</span>{% endif %}
-          {% if tab == "agents" and cell.online %}<span class="live-dot badge badge-outline badge-xs">online</span>{% endif %}
         </span>
         {% if tab == "agents" %}
+          {% if cell.agent_count %}<span class="flex flex-wrap gap-1">{{ states.live_fraction(cell.live_count, cell.agent_count) }}</span>{% endif %}
           {% if cell.last_connected %}
-          <span class="text-sm">Last connected</span>
-          <span class="font-mono text-xs">{{ cell.last_connected | jst }}</span>
-          {% else %}
+          <span class="text-sm" title="{{ cell.last_connected | jst }}">Last connected {{ cell.last_connected_ago }}</span>
+          {% elif cell.agent_count %}
           <span class="text-sm text-base-content/60">Never connected</span>
+          {% else %}
+          <span class="text-sm text-base-content/60">No agents yet</span>
           {% endif %}
         {% elif cell.latest %}
           <span class="line-clamp-2 text-sm break-words">{{ mask(cell.latest.title) if cell.latest.title else "Untitled submission" }}</span>

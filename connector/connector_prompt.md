@@ -82,7 +82,7 @@ Read the values from the environment variables `DASHBOARD_URL` and `DASHBOARD_AP
 **Any agent can read the data of every agent in the same class; an agent can only delete its own.** Agents of other classes don't exist as far as the API is concerned (`404`).
 
 - `{agent}` in a path is `me` (this agent), another agent's numeric `id`, or its exact name (URL-encoded). An unknown agent gets `404`. Two students' agents in the class can share a name: then the name gets `409` with `{"detail": {"message", "ids": [...]}}`, and you use an id instead.
-- An agent looks like `{"id", "name", "owner": {"full_name", "gen"}, "description", "you": true for this agent, "folders": [...], "online", "paused", "accepts_messages", "check_in_every", "created_at", "last_seen", "monitors": [their names]}`. `GET /api/agents/{agent}` adds `"categories": [{"name", "count", "latest_at"}]`.
+- An agent looks like `{"id", "name", "owner": {"full_name", "gen"}, "description", "you": true for this agent, "folders": [...], "online", "state" ("live", "attention", "offline" or "paused"), "rhythm" ("Real-time", "Hourly", "Daily", "Weekly", "Monthly" or null), "paused", "accepts_messages", "check_in_every", "created_at", "last_seen", "monitors": [their names]}`. `GET /api/agents/{agent}` adds `"categories": [{"name", "count", "latest_at"}]`.
 - An output looks like `{"id", "agent_id", "category", "kind", "content", "created_at"}`.
   - `kind` is `"text"`, `"number"`, `"link"`, `"json"` or `"file"`.
   - `content` is what was sent: text, a number, or a list/dict; for files, the file's name.
@@ -164,7 +164,7 @@ The dashboard can be unreachable for a while: no internet, a redeploy, a sleepin
 
 ## Start, Pause and messages
 
-- **Check in at a rhythm that suits this agent**, with `POST /api/state`, sending `check_in_every`: how many seconds until the next check-in (1 to 604800, i.e. a week). The dashboard shows the agent as **online** while it keeps to that rhythm, plus half an interval of slack (at least 30 seconds). Without `check_in_every`, it expects a check-in every 60 seconds.
+- **Check in at a rhythm that suits this agent**, with `POST /api/state`, sending `check_in_every`: how many seconds until the next check-in (1 to 3024000, i.e. 35 days). The dashboard shows the agent as **Live** while it keeps to that rhythm, plus half an interval of slack (at least 30 seconds), and tags it Real-time, Hourly, Daily, Weekly or Monthly. Without `check_in_every` (and unless the owner sets an interval on the agent page, which wins), the agent shows **Needs attention: interval unspecified**, so always send it.
   - **An agent that runs all the time:** check in in the background every few seconds to minutes. Shorter means Start/Pause and messages reach it faster.
   - **An agent that runs on a schedule** (hourly, daily, as a cron job or cloud function): check in once at the start of each run, with `check_in_every` set to the schedule, e.g. `3600` for hourly. It then stays "online" between runs.
   - Ask me which kind this agent is if it isn't obvious from the code.

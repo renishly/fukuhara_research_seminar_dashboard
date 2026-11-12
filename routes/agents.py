@@ -33,12 +33,17 @@ from db import (
     utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
+import run_status
+from checkins import activity as checkin_activity
+from routes.live_feed import sync_all
 from routes.agent_tools import (
     MAX_AGENT_NAME,
     MAX_CATEGORY,
+    MAX_CHECK_IN,
     MAX_DESCRIPTION,
     MAX_FOLDER_NAME,
     agent_name_taken,
+    agent_state,
     check_in_text,
     check_new_api_key,
     clean_link,
@@ -47,10 +52,14 @@ from routes.agent_tools import (
     file_details,
     folders_of,
     grid_details,
-    is_online,
+    human_interval,
+    interval_mismatch,
     log_activity,
     monitor_names,
     output_categories,
+    rhythm_mix,
+    state_of,
+    states_for,
     set_monitor,
     store_api_key,
 )
@@ -188,10 +197,15 @@ def grid_context(db: Session, viewer: Viewer, course: Course, owner: User, page:
         .order_by(func.lower(Agent.name), Agent.name).offset(first).limit(CELLS_PER_PAGE)
     ).all()
     cells = []
+    # Every agent on this dashboard (or in this folder), not just this page's:
+    # for the summary line, the rhythm bar and the live feed.
+    everyone = list(db.exec(agents_query(course.id, owner.id, folder_id)).all())
+    states = states_for(db, everyone)
+    sync_all(db, everyone, states)
     # Guests only see names, status and descriptions, so they need no details.
     details = grid_details(db, list(agents)) if viewer.is_member else {}
     for agent in agents:
-        cell = {"agent": agent, "online": is_online(agent)}
+        cell = {"agent": agent, "state": states[agent.id]}
         if viewer.is_member:
             # The pinned item: the newest output of the pinned category, or the pinned monitor.
             cell |= details[agent.id]
@@ -203,6 +217,7 @@ def grid_context(db: Session, viewer: Viewer, course: Course, owner: User, page:
         "show_add_card": is_owner and first <= total < first + CELLS_PER_PAGE,
         "page": page, "total_pages": total_pages, "total_agents": total, "folder": folder,
         "pinned_files": pinned_files, "inline_types": INLINE_TYPES,
+        "rhythm_mix": rhythm_mix(everyone, states),
     }
 
 
@@ -388,14 +403,35 @@ def delete_folder(folder_id: int, course_id: int | None = Form(None), viewer: Vi
 
 
 def header_context(db: Session, viewer: Viewer, agent: Agent, settings_open: bool = False, **errors) -> dict:
+    runs = run_status.load(db, [agent.id])
+    state = agent_state(agent, run=runs.get(agent.id))
+    sync_all(db, [agent], {agent.id: state})  # e.g. just paused, or its interval just changed
     tagged = folders_of(db, agent.id)
     tagged_ids = {folder.id for folder in tagged}
     untagged = [f for f in owner_folders(db, agent.owner_id) if f.id not in tagged_ids] if owns_agent(viewer, agent) else []
-    return {"agent": agent, "online": is_online(agent), "tagged": tagged, "untagged": untagged,
+    return {"agent": agent, "tagged": tagged, "untagged": untagged,
             "is_owner": owns_agent(viewer, agent), "settings_open": settings_open,
-            "check_in": check_in_text(agent), "owner": db.get(User, agent.owner_id),
+            "check_in": check_in_text(agent), "state": state, "run": runs.get(agent.id),
+            "owner": db.get(User, agent.owner_id),
+            "interval_mismatch": interval_mismatch(agent),
+            "agent_interval": human_interval(agent.check_in_seconds) if agent.check_in_seconds else None,
+            "owner_interval": interval_form_value(agent.owner_check_in_seconds),
             "error": errors.get("error"), "monitor_error": errors.get("monitor_error"),
-            "description_error": errors.get("description_error")}
+            "description_error": errors.get("description_error"), "interval_error": errors.get("interval_error")}
+
+
+INTERVAL_UNITS = {"minutes": 60, "hours": 3600, "days": 86400}
+
+
+def interval_form_value(seconds: int | None) -> tuple[str, str]:
+    """The owner's interval as the form shows it: (amount, unit), in the largest
+    whole unit; ("", "hours") if none is set."""
+    if not seconds:
+        return "", "hours"
+    for unit in ("days", "hours", "minutes"):
+        if seconds % INTERVAL_UNITS[unit] == 0:
+            return str(seconds // INTERVAL_UNITS[unit]), unit
+    return str(round(seconds / 60, 2)), "minutes"
 
 
 # Outputs and Monitors work the same way on an agent's page (the "feeds"):
@@ -524,6 +560,7 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
         raise forbidden("Guests can see the agent grid, but not agent pages.")
     agent = viewable_agent(db, viewer, agent_id)
     context = header_context(db, viewer, agent) | both_feeds(db, viewer, agent)
+    context["activity"] = checkin_activity(db, agent, context["state"].rhythm)
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}
     course = db.get(Course, agent.course_id)
@@ -705,8 +742,11 @@ def agent_command(agent_id: int, command: str = Form(...), text: str | None = Fo
     db.commit()
     db.refresh(agent)
     reply = alert_html("success", f'Sent "{command}" to {agent.name}.')
-    # Also update the running/paused badge at the top of the page.
-    return HTMLResponse(reply + render_text(db, viewer, "partials/run_state.html", agent=agent, oob=True))
+    # Also update the state pill at the top of the page (Paused, or back to its state).
+    state = state_of(db, agent)
+    sync_all(db, [agent], {agent.id: state})  # "paused by owner" / "resumed" in the live feed
+    return HTMLResponse(reply + render_text(db, viewer, "partials/agent_state.html", state=state,
+                                            standalone=True, oob=True))
 
 
 @router.get("/agents/{agent_id}/messages-ready")
@@ -833,6 +873,31 @@ def set_description(agent_id: int, description: str = Form(""), viewer: Viewer =
         db.commit()
         db.refresh(agent)
     return header_reply(db, viewer, agent, description_error=error)
+
+
+@router.post("/agents/{agent_id}/interval")
+def set_interval(agent_id: int, amount: str = Form(""), unit: str = Form("hours"),
+                 viewer: Viewer = Depends(checked_member), db: Session = Depends(get_session)):
+    """The owner sets how often the agent checks in; it wins over the agent's
+    own value. Saving it empty goes back to the agent's value."""
+    agent = own_agent(db, viewer, agent_id)
+    error = None
+    if not amount.strip():
+        agent.owner_check_in_seconds = None
+    else:
+        try:
+            seconds = round(float(amount) * INTERVAL_UNITS[unit])
+        except (ValueError, KeyError, OverflowError):
+            seconds = None
+        if seconds is None or not 60 <= seconds <= MAX_CHECK_IN:
+            error = "The interval must be between 1 minute and 35 days."
+        else:
+            agent.owner_check_in_seconds = seconds
+    if error is None:
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+    return header_reply(db, viewer, agent, interval_error=error)
 
 
 @router.post("/agents/{agent_id}/tags")

@@ -239,12 +239,20 @@ class Agent(SQLModel, table=True):
     # copy so "View key" can show it again (see security.py).
     api_key_hash: str = Field(unique=True, index=True)
     api_key_encrypted: str | None = None
-    # How often the agent says it checks in (seconds). None = the default.
+    # How often the agent checks in (seconds): as the agent itself says, and as
+    # the owner set it on the agent page. The owner's setting wins; with
+    # neither, the interval is "unspecified" (see agent_tools.agent_state()).
     check_in_seconds: int | None = None
+    owner_check_in_seconds: int | None = None
     accepts_messages: bool = False  # set by the agent: accept_messages()
     accepts_inbox: bool = False  # set by the agent: accept_inbox()
     paused: bool = False  # set by the owner's Start/Pause buttons
     last_seen_at: datetime | None = None  # None = never connected
+    check_ins_since: datetime | None = None  # when its check-in history (CheckInSpan) began
+    # The state last written to the live feed (see routes/live_feed.py), and since when.
+    feed_state: str | None = None
+    feed_state_at: datetime | None = None
+    feed_scanned_at: datetime | None = None  # its check-in history is checked for unseen outages up to here
     # What's pinned to the grid card: one output category OR one monitor (by name).
     pinned_category: str | None = None
     pinned_monitor_name: str | None = None
@@ -259,6 +267,30 @@ class Agent(SQLModel, table=True):
     monitor_updated_at: datetime | None = None
     pinned_monitor: bool = False
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class CheckInSpan(SQLModel, table=True):
+    """A stretch of time an agent was active: API calls close together are
+    merged into one span (see checkins.py), for the Check-in activity graph."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", index=True)
+    started_at: datetime
+    ended_at: datetime = Field(index=True)
+
+
+class StateChange(SQLModel, table=True):
+    """One row of the live feed: an agent changed state (went offline, came
+    back, needs attention, recovered, paused...) or brought new data. Only
+    changes are kept, never every check-in (see routes/live_feed.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", index=True)
+    course_id: int = Field(foreign_key="course.id", index=True)
+    at: datetime = Field(index=True)  # when it happened (worked out, not when it was noticed)
+    kind: str  # "state" or "data"
+    state: str  # the state it changed to ("live", "attention", "offline", "paused"); "data" for new data
+    message: str
 
 
 class Event(SQLModel, table=True):

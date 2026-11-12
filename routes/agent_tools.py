@@ -3,25 +3,37 @@
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
 from sqlmodel import Session, delete, func, select
 
+import run_status
+from run_status import RunStatus
+from checkins import CHECK_IN_SLACK, allowed_gap, check_in_interval  # noqa: F401 (used here and re-exported)
 from db import Agent, AgentFolder, Event, Folder, Monitor, MonitorNotifySetting, Output, StoredFile, as_utc, utc_now
 from security import MIN_API_KEY_LENGTH, encrypt_api_key, hash_api_key
 from uploads import delete_stored_file
 
-# "Online" follows each agent's own rhythm: an agent says how often it checks
-# in (check_in_every, 1 second to 1 week), and counts as online until that
-# time has passed plus some slack: half the interval, and at least 30
-# seconds, so one slow check-in doesn't flip it to offline. Agents that never
-# say are expected every 60 seconds.
-DEFAULT_CHECK_IN = 60
+# "Online" follows each agent's own rhythm: how often it checks in (1 second
+# to 35 days), set by the agent (check_in_every) or by its owner on the agent
+# page (the owner's setting wins). It counts as online until that time has
+# passed plus some slack: half the interval, and at least 30 seconds, so one
+# slow check-in doesn't flip it to offline. With no interval at all, lateness
+# can't be judged, so the agent "needs attention" until one is set.
 MIN_CHECK_IN = 1
-MAX_CHECK_IN = 7 * 24 * 60 * 60
-CHECK_IN_SLACK = 30
+MAX_CHECK_IN = 35 * 24 * 60 * 60
+
+# The rhythm tag each interval gets: up to (but not including) each limit.
+RHYTHMS = [
+    (15 * 60, "Real-time"),
+    (3 * 60 * 60, "Hourly"),
+    (3 * 24 * 60 * 60, "Daily"),
+    (14 * 24 * 60 * 60, "Weekly"),
+    (MAX_CHECK_IN + 1, "Monthly"),
+]
 
 MAX_AGENT_NAME = 50
 MAX_DESCRIPTION = 1000
@@ -43,27 +55,79 @@ LATE_AFTER = timedelta(minutes=1)
 LATE_NOTE = " (delivered late)"
 
 
-def check_in_interval(agent: Agent) -> int:
-    return agent.check_in_seconds or DEFAULT_CHECK_IN
+def interval_mismatch(agent: Agent) -> bool:
+    """True if the owner's setting overrides a different value the agent reports."""
+    return bool(agent.owner_check_in_seconds and agent.check_in_seconds
+                and agent.owner_check_in_seconds != agent.check_in_seconds)
 
 
 def is_online(agent: Agent, now: datetime | None = None) -> bool:
-    """True if the agent has checked in as often as it said it would.
+    """True if the agent has checked in as often as expected.
 
     E.g. an agent that checks in every 5 seconds is online if seen in the last
-    35 seconds; an hourly one, if seen in the last 90 minutes.
+    35 seconds; an hourly one, if seen in the last 90 minutes. Without an
+    interval it can't be judged late, so it counts as online once connected.
     """
     if agent.last_seen_at is None:
         return False
     interval = check_in_interval(agent)
-    allowed = timedelta(seconds=interval + max(CHECK_IN_SLACK, interval / 2))
-    return (now or utc_now()) - as_utc(agent.last_seen_at) <= allowed
+    if interval is None:
+        return True
+    return (now or utc_now()) - as_utc(agent.last_seen_at) <= allowed_gap(interval)
 
 
-def human_interval(seconds: int | None) -> str:
+def rhythm_tag(seconds: int | None) -> str | None:
+    """The general tag for an interval: "Real-time", "Hourly", "Daily",
+    "Weekly" or "Monthly"; None if there's no interval."""
+    if not seconds:
+        return None
+    for limit, tag in RHYTHMS:
+        if seconds < limit:
+            return tag
+    return RHYTHMS[-1][1]
+
+
+def rhythm_key(tag: str | None) -> str:
+    """The CSS name of a rhythm tag's colour: "realtime", "daily"..., "unspecified"."""
+    return (tag or "unspecified").lower().replace("-", "")
+
+
+# States that mean an agent isn't running correctly. Paused isn't one: the
+# owner chose it.
+PROBLEM_STATES = ("offline", "attention")
+
+
+def rhythm_mix(agents: list[Agent], states: "dict[int, AgentState]") -> list[dict]:
+    """How many agents have each rhythm, in rhythm order (Real-time first,
+    Unspecified last), leaving out rhythms nobody has. Each item:
+    {"tag", "key", "count", "percent", "ok", "problems", "offline", "attention"},
+    where problems = offline + needs attention, and ok = the rest. `states`
+    comes from states_for()."""
+    groups: dict[str | None, dict] = {}
+    for agent in agents:
+        state = states[agent.id]
+        group = groups.setdefault(state.rhythm, {"count": 0, "offline": 0, "attention": 0})
+        group["count"] += 1
+        if state.key in PROBLEM_STATES:
+            group[state.key] += 1
+    total = len(agents)
+    order = [tag for _, tag in RHYTHMS] + [None]
+    mix = []
+    for tag in order:
+        if tag not in groups:
+            continue
+        group = groups[tag]
+        problems = group["offline"] + group["attention"]
+        mix.append({"tag": tag or "Unspecified", "key": rhythm_key(tag), "count": group["count"],
+                    "percent": round(100 * group["count"] / total), "problems": problems,
+                    "ok": group["count"] - problems, "offline": group["offline"], "attention": group["attention"],
+                    "ok_percent": 100 * (group["count"] - problems) / total, "problem_percent": 100 * problems / total})
+    return mix
+
+
+def human_interval(seconds: int) -> str:
     """A check-in interval in words: "3 s", "5 min", "1 h 30 min", "1 day"."""
-    seconds = int(seconds or DEFAULT_CHECK_IN)
-    days, rest = divmod(seconds, 86400)
+    days, rest = divmod(int(seconds), 86400)
     hours, rest = divmod(rest, 3600)
     minutes, secs = divmod(rest, 60)
     parts = [f"{days} day{'s' if days != 1 else ''}" if days else "",
@@ -72,7 +136,90 @@ def human_interval(seconds: int | None) -> str:
 
 
 def check_in_text(agent: Agent) -> str:
-    return "every " + human_interval(check_in_interval(agent))
+    interval = check_in_interval(agent)
+    return "every " + human_interval(interval) if interval else "interval unspecified"
+
+
+def rough_duration(seconds: float) -> str:
+    """A length of time, roughly, in words: "40 s", "12 min", "3 h", "2 days"."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} s"
+    if seconds < 3600:
+        return f"{seconds // 60} min"
+    if seconds < 2 * 86400:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} days"
+
+
+def ago(moment: datetime, now: datetime) -> str:
+    """How long ago, roughly: "just now", "12 min ago", "3 h ago", "2 days ago"."""
+    seconds = (now - as_utc(moment)).total_seconds()
+    return "just now" if seconds < 60 else rough_duration(seconds) + " ago"
+
+
+@dataclass
+class AgentState:
+    """What an agent's card says about it: one state, plus a line saying when
+    it last checked in and (for anything but Live) a line saying why.
+
+    key: "paused", "offline", "attention" or "live" (checked in that order;
+    the first that applies wins). `when` and `why` are for members only;
+    guests see the state's label and the rhythm tag.
+    """
+
+    key: str
+    label: str
+    when: str
+    why: str | None
+    rhythm: str | None  # "Daily" etc., None if the interval is unspecified
+    interval: int | None
+
+    @property
+    def every(self) -> str | None:
+        """The interval in words ("1 day"), or None."""
+        return human_interval(self.interval) if self.interval else None
+
+
+STATE_LABELS = {"paused": "Paused", "offline": "Offline", "attention": "Needs attention", "live": "Live"}
+
+
+def agent_state(agent: Agent, now: datetime | None = None, run: RunStatus | None = None) -> AgentState:
+    """Work out an agent's state from its check-ins and settings, and from its
+    "Run status" monitor if it sends one (run_status.py). Use state_of() or
+    states_for() to have the Run status loaded for you."""
+    now = now or utc_now()
+    interval = check_in_interval(agent)
+    seen = as_utc(agent.last_seen_at) if agent.last_seen_at else None
+    when = f"checked in {ago(seen, now)}" if seen else "never connected"
+
+    def state(key: str, why: str | None) -> AgentState:
+        return AgentState(key, STATE_LABELS[key], when, why, rhythm_tag(interval), interval)
+
+    if agent.paused:
+        return state("paused", "paused by owner")
+    if seen is None:
+        return state("offline", "hasn't connected yet")
+    if interval is None:
+        return state("attention", "interval unspecified: set it on the agent page or with check_in(every=...)")
+    if now - seen > allowed_gap(interval):
+        return state("offline", f"no check-in for {rough_duration((now - seen).total_seconds())}, "
+                                f"expected every {human_interval(interval)}")
+    problem = run.problem() if run else None
+    if problem:
+        return state("attention", problem)
+    return state("live", None)
+
+
+def states_for(db: Session, agents: list[Agent], now: datetime | None = None) -> dict[int, AgentState]:
+    """Each agent's state, with all their Run status monitors read in one query."""
+    now = now or utc_now()
+    runs = run_status.load(db, [agent.id for agent in agents])
+    return {agent.id: agent_state(agent, now, runs.get(agent.id)) for agent in agents}
+
+
+def state_of(db: Session, agent: Agent, now: datetime | None = None) -> AgentState:
+    return states_for(db, [agent], now)[agent.id]
 
 
 def clean_name(raw: str, max_length: int) -> tuple[str, str | None]:

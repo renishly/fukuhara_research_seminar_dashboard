@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 
 from conftest import PASSWORD, api, key_for
 from db import Agent, Command, Event, InboxFile, Monitor, Output, StoredFile, utc_now
-from routes.agent_tools import is_online
+from routes.agent_tools import agent_state, is_online, rhythm_mix, rhythm_tag, states_for
 from security import decrypt_api_key, hash_api_key
 
 
@@ -76,6 +76,7 @@ def test_owner_only_routes_refuse_everyone_else(engine, client, admin, taro, han
         ("post", f"/agents/{agent}/command", {"command": "start"}),
         ("post", f"/agents/{agent}/rename", {"name": "stolen"}),
         ("post", f"/agents/{agent}/description", {"description": "x"}),
+        ("post", f"/agents/{agent}/interval", {"amount": "1", "unit": "days"}),
         ("post", f"/agents/{agent}/monitors/link", {"name": "Sheet", "url": "https://example.com"}),
         ("post", f"/agents/{agent}/monitors/pin", {"name": "x"}),
         ("post", f"/agents/{agent}/outputs/pin", {"name": "x"}),
@@ -106,7 +107,8 @@ def test_members_can_read_other_agents_but_guests_only_see_the_grid(taro, hanako
     assert guest.get(f"/agents/{agent}/events").status_code == 403
     assert guest.get(f"/agents/{agent}/monitors").status_code == 403
     grid = guest.get(f"/classes/{course}/agents/{taro.id}").text
-    assert "helper" in grid and "Finds papers for" in grid and "online" in grid
+    assert "helper" in grid and "Finds papers for" in grid and "Needs attention" in grid  # state pill only:
+    assert "interval unspecified" not in grid and "checked in" not in grid  # no why or when lines for guests
     assert "Yamada Taro" not in grid  # names hidden from guests, even in descriptions
     assert f'href="/agents/{agent}"' not in grid  # no links to agent pages
 
@@ -117,14 +119,30 @@ def test_non_owners_cannot_post_controls_as_guests(guest, taro, course, create_a
     assert guest.post(f"/agents/{agent}/outputs/notify", data={"category": "x"}).status_code == 403
 
 
-def test_agents_tab_shows_last_connection(client, admin, taro, hanako, course, create_agent):
+def test_agents_tab_shows_states_and_last_connection(client, admin, taro, hanako, course, create_agent):
     create_agent(taro, course, "helper")
+    create_agent(taro, course, "silent")
     window = admin.get(f"/classes/{course}/window/agents").text
-    assert window.count("Never connected") == 2
+    assert "Never connected" in window and "No agents yet" in window  # taro / hanako
+    assert "0/2 live" in window and "state-offline" in window
     opt_in(client, "helper", check_in_every=60)
     window = admin.get(f"/classes/{course}/window/agents").text
-    assert "Last connected" in window and "JST" in window and "online" in window
-    assert window.count("Never connected") == 1
+    assert "Last connected just now" in window and "JST" in window  # the exact time is in the hover text
+    assert "1/2 live" in window and "state-attention" in window and "Never connected" not in window
+    opt_in(client, "silent", check_in_every=60)
+    assert "2/2 live" in admin.get(f"/classes/{course}/window/agents").text
+
+
+def test_cards_and_header_show_the_state_and_pause_updates_it(client, taro, hanako, course, create_agent):
+    agent = create_agent(taro, course, "helper")
+    opt_in(client, "helper", check_in_every=86400)
+    grid = hanako.get(f"/classes/{course}/agents/{taro.id}").text
+    assert "state-live" in grid and ">Live<" in grid and ">Daily<" in grid and "checked in just now" in grid
+    assert "rhythm-name rhythm-daily" in grid  # the name in the Daily colour
+    reply = taro.post(f"/agents/{agent}/command", data={"command": "pause"}).text
+    assert 'id="agent-state"' in reply and "hx-swap-oob" in reply and ">Paused<" in reply
+    page = hanako.get(f"/agents/{agent}").text
+    assert ">Paused<" in page and "paused by owner" in page and ">Daily<" in page
 
 
 # --- Adding agents and keys -----------------------------------------------------------------
@@ -204,7 +222,8 @@ def test_unknown_empty_or_missing_keys_get_401(client):
 def test_check_in_every_limits(client, taro, course, create_agent):
     create_agent(taro, course, "helper")
     assert opt_in(client, "helper", check_in_every=0).status_code == 422
-    assert opt_in(client, "helper", check_in_every=7 * 24 * 3600 + 1).status_code == 422
+    assert opt_in(client, "helper", check_in_every=35 * 24 * 3600 + 1).status_code == 422
+    assert opt_in(client, "helper", check_in_every=30 * 24 * 3600).status_code == 200  # monthly is allowed
     reply = opt_in(client, "helper", check_in_every=3600).json()
     assert reply["check_in_every"] == 3600 and reply["paused"] is False
 
@@ -213,8 +232,11 @@ def test_online_status_uses_the_interval_plus_slack(engine, client, taro, course
     agent = agent_row(engine, create_agent(taro, course, "helper"))
     assert not is_online(agent)  # never connected
     now = utc_now()
+    agent.last_seen_at = now - timedelta(days=3)
+    assert is_online(agent, now)  # no interval: lateness can't be judged
+    agent.check_in_seconds = 60
     agent.last_seen_at = now - timedelta(seconds=85)
-    assert is_online(agent, now)  # default 60 s + 30 s slack
+    assert is_online(agent, now)  # 60 s + 30 s slack
     agent.last_seen_at = now - timedelta(seconds=95)
     assert not is_online(agent, now)
     agent.check_in_seconds = 3600
@@ -225,6 +247,84 @@ def test_online_status_uses_the_interval_plus_slack(engine, client, taro, course
     agent.check_in_seconds = 5
     agent.last_seen_at = now - timedelta(seconds=34)
     assert is_online(agent, now)  # at least 30 s slack
+
+
+def test_rhythm_tags_follow_the_interval():
+    assert rhythm_tag(None) is None
+    assert [rhythm_tag(s) for s in (30, 14 * 60)] == ["Real-time"] * 2
+    assert [rhythm_tag(s) for s in (15 * 60, 3600, 2 * 3600)] == ["Hourly"] * 3
+    assert [rhythm_tag(s) for s in (3 * 3600, 6 * 3600, 86400, 2 * 86400)] == ["Daily"] * 4
+    assert [rhythm_tag(s) for s in (3 * 86400, 7 * 86400, 13 * 86400)] == ["Weekly"] * 3
+    assert [rhythm_tag(s) for s in (14 * 86400, 30 * 86400, 35 * 86400)] == ["Monthly"] * 3
+
+
+def test_rhythm_mix_counts_agents_per_tag_in_order(engine, client, taro, guest, course, create_agent):
+    for name, every in (("a", 86400), ("b", 86400), ("c", 3600), ("d", None)):
+        create_agent(taro, course, name)
+        opt_in(client, name, **({"check_in_every": every} if every else {}))
+    with Session(engine) as db:
+        agents = list(db.exec(select(Agent)).all())
+        mix = rhythm_mix(agents, states_for(db, agents))
+        assert [(m["tag"], m["key"], m["count"], m["percent"], m["ok"], m["problems"]) for m in mix] == [
+            ("Hourly", "hourly", 1, 25, 1, 0), ("Daily", "daily", 2, 50, 2, 0),
+            ("Unspecified", "unspecified", 1, 25, 0, 1)]  # no interval: needs attention
+        # One daily agent goes quiet for 2 days: half of Daily is now not running.
+        quiet = next(agent for agent in agents if agent.name == "b")
+        quiet.last_seen_at = utc_now() - timedelta(days=2)
+        db.add(quiet)
+        db.commit()
+        agents = list(db.exec(select(Agent)).all())
+        daily = rhythm_mix(agents, states_for(db, agents))[1]
+        assert (daily["ok"], daily["problems"], daily["offline"], daily["attention"]) == (1, 1, 1, 0)
+    for viewer in (taro, guest):  # the bar is on the student's dashboard, guests included
+        grid = viewer.get(f"/classes/{course}/agents/{taro.id}").text
+        assert "Check-in rhythms" in grid and "rhythm-tag rhythm-daily" in grid
+        assert 'title="Daily: 2 of 4 (50%); 1 not running correctly (1 offline)"' in grid
+        assert "1 not running" in grid and "rhythm-bad" in grid
+
+
+def test_agent_state_checks_paused_offline_attention_live_in_order(engine, taro, course, create_agent):
+    agent = agent_row(engine, create_agent(taro, course, "helper"))
+    now = utc_now()
+    state = agent_state(agent, now)
+    assert (state.key, state.when, state.rhythm) == ("offline", "never connected", None)
+    agent.last_seen_at = now - timedelta(hours=3)
+    state = agent_state(agent, now)
+    assert state.key == "attention" and state.label == "Needs attention"
+    assert "interval unspecified" in state.why and state.when == "checked in 3 h ago"
+    agent.check_in_seconds = 86400
+    state = agent_state(agent, now)
+    assert (state.key, state.why, state.rhythm) == ("live", None, "Daily")
+    agent.last_seen_at = now - timedelta(hours=37)  # a daily agent may be 12 h late (half its interval)
+    state = agent_state(agent, now)
+    assert state.key == "offline" and state.why == "no check-in for 37 h, expected every 1 day"
+    agent.paused = True
+    assert agent_state(agent, now).key == "paused"  # paused wins over everything
+
+
+def test_owner_sets_the_interval_and_it_wins_with_a_warning(engine, client, taro, course, create_agent):
+    agent = create_agent(taro, course, "helper")
+    opt_in(client, "helper")
+    page = taro.get(f"/agents/{agent}").text
+    assert "interval unspecified" in page and "Check-in interval" in page
+    reply = taro.post(f"/agents/{agent}/interval", data={"amount": "1", "unit": "days"})
+    assert reply.status_code == 200 and "every 1 day (Daily)" in reply.text
+    assert agent_row(engine, agent).owner_check_in_seconds == 86400
+    # The agent reports something else: the owner's setting stays, with a warning.
+    assert opt_in(client, "helper", check_in_every=3600).json()["check_in_every"] == 86400
+    page = taro.get(f"/agents/{agent}").text
+    assert "reports checking in every 1 h" in page and "every 1 day (Daily)" in page
+    info = client.get(f"/api/agents/{agent}", headers=api("helper")).json()
+    assert (info["state"], info["rhythm"], info["check_in_every"]) == ("live", "Daily", 86400)
+    # Out of range or nonsense: refused, nothing changes.
+    for amount, unit in (("0.5", "minutes"), ("36", "days"), ("abc", "hours"), ("1", "weeks"), ("nan", "hours")):
+        assert "between 1 minute and 35 days" in taro.post(f"/agents/{agent}/interval",
+                                                           data={"amount": amount, "unit": unit}).text
+    assert agent_row(engine, agent).owner_check_in_seconds == 86400
+    # Saved empty: back to the agent's own value, and no warning.
+    taro.post(f"/agents/{agent}/interval", data={"amount": "", "unit": "hours"})
+    page = taro.get(f"/agents/{agent}").text
+    assert "every 1 h (Hourly)" in page and "reports checking in" not in page
 
 
 def test_late_items_land_at_their_real_time(engine, client, taro, course, create_agent):

@@ -164,12 +164,15 @@ FUNCTIONS
 
 CHECK-INS
   Each agent decides how often it checks in: every few seconds, every few
-  minutes, hourly, daily (1 second to 1 week). A check-in says "I'm here",
-  tells the dashboard how often to expect the next one, and picks up any
-  waiting Start/Pause/messages. The dashboard shows the agent as "online" while
-  it keeps to its own rhythm (plus half an interval of slack), so an hourly
-  agent stays "online" between runs. Agents that never say how often they
-  check in are expected every 60 seconds. Any call to the dashboard also counts
+  minutes, hourly, daily, weekly, monthly (1 second to 35 days). A check-in
+  says "I'm here", tells the dashboard how often to expect the next one, and
+  picks up any waiting Start/Pause/messages. The dashboard shows the agent as
+  "Live" while it keeps to its own rhythm (plus half an interval of slack), so
+  an hourly agent stays live between runs, and tags it Real-time, Hourly,
+  Daily, Weekly or Monthly. An agent that never says how often it checks in
+  (and whose owner hasn't set it on the agent page) shows "Needs attention:
+  interval unspecified", so always pass `every` once. The owner's setting on
+  the agent page wins over the agent's. Any call to the dashboard also counts
   as being seen.
 
 START AND PAUSE (the dashboard's buttons)
@@ -233,7 +236,7 @@ BUFFER_DIR = os.getenv("DASHBOARD_BUFFER_DIR") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "dashboard_buffer"
 )
 RETRY_SECONDS = 15
-MIN_CHECK_IN, MAX_CHECK_IN = 1, 7 * 24 * 60 * 60  # check-in interval limits: 1 second to a week
+MIN_CHECK_IN, MAX_CHECK_IN = 1, 35 * 24 * 60 * 60  # check-in interval limits: 1 second to 35 days
 BUFFER_MAX_ITEMS = 1000  # beyond this, the oldest waiting items are dropped
 BUFFER_MAX_FILE_BYTES = 100 * 1024 * 1024  # 100 MB of waiting files at most
 
@@ -383,7 +386,7 @@ def _check_in() -> bool:
 
 
 def _declare_every(every) -> None:
-    """Remember how often this agent checks in (seconds, 1 second to a week).
+    """Remember how often this agent checks in (seconds, 1 second to 35 days).
 
     Values outside that range are brought into it, with a warning (never an error).
     """

@@ -622,6 +622,575 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   color: var(--ink);
 }
 
+/* Agent states (partials/agent_state.html): a coloured mark before the word.
+   Live pulses green, Needs attention is amber, Offline red, Paused a navy
+   square (a "stop" shape, so it differs by shape too, not only colour). */
+.state-pill {
+  background: #ffffff;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.state-pill::before {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: 0.35em;
+  border-radius: 50%;
+}
+.state-live::before {
+  background: var(--green);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+.state-attention { background: #fff4d6; }
+.state-attention::before { background: var(--amber); }
+.state-offline { background: #fde4e2; }
+.state-offline::before { background: var(--red); }
+.state-paused::before {
+  background: var(--ink);
+  border-radius: 0;
+}
+
+/* Rhythm tags (Real-time ... Monthly) and the "Check-in rhythms" bar. One
+   colour per rhythm, kept clear of the state colours (green, amber, red,
+   navy) and checked for colour-blind separation in this order. Text on each
+   is navy or white, whichever reads better on that colour; --rhythm-text is
+   a darker shade for writing in that colour (agent names). */
+.rhythm-realtime { --rhythm: #e87ba4; --rhythm-ink: var(--ink); --rhythm-text: #bd215c; }
+.rhythm-hourly { --rhythm: #256dc8; --rhythm-ink: #ffffff; --rhythm-text: #2264b7; }
+.rhythm-daily { --rhythm: #eb6834; --rhythm-ink: var(--ink); --rhythm-text: #af3e11; }
+.rhythm-weekly { --rhythm: #6250d6; --rhythm-ink: #ffffff; --rhythm-text: #604ed6; }
+.rhythm-monthly { --rhythm: #1baf7a; --rhythm-ink: var(--ink); --rhythm-text: #11714f; }
+.rhythm-unspecified { --rhythm: #b9c3d3; --rhythm-ink: var(--ink); }
+/* An agent's name in its rhythm's colour: a darker shade of it, so it reads
+   as text (at least 4.5:1 on the cards). */
+.rhythm-name.rhythm-name { color: var(--rhythm-text, var(--ink)); }
+.rhythm-tag {
+  background: var(--rhythm);
+  color: var(--rhythm-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rhythm-bar {
+  display: flex;
+  gap: 2px;
+  height: 1.75rem;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.rhythm-seg {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  flex-basis: 0;
+  min-width: 4px;
+}
+.rhythm-ok,
+.rhythm-bad {
+  flex-basis: 0;
+  min-width: 4px;
+}
+.rhythm-ok { background: var(--rhythm); }
+/* Not running correctly: see-through, with diagonal lines in the rhythm's colour. */
+.rhythm-bad {
+  background: repeating-linear-gradient(135deg, var(--rhythm) 0 2px, transparent 2px 7px);
+  box-shadow: inset 0 0 0 2px var(--rhythm);
+}
+/* The section's one label, centred over the whole block, on a white chip so
+   it reads over both the filled and the hatched part. */
+.rhythm-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.4rem;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rhythm-warn {
+  color: var(--rhythm);
+  font-size: 1.05rem;
+  line-height: 1;
+  /* A navy outline so the sign stands out in every rhythm colour. */
+  -webkit-text-stroke: 0.6px var(--ink);
+}
+.rhythm-problems {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+/* The legend runs across the page in one row and only wraps when it runs out of room. */
+.rhythm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.rhythm-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+.rhythm-figure {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.rhythm-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  background: var(--rhythm);
+}
+
+/* The "Check-in activity" bar graph (partials/checkin_graph.html): green on
+   time, orange late, red ✕ for a missed check-in. */
+.ci-graph { --ci-ok: var(--green); --ci-late: #f08c00; }
+.ci-caption { font-size: 0.75rem; color: rgb(11 31 58 / 0.7); margin-bottom: 0.25rem; }
+.ci-plot {
+  position: relative;
+  height: 8rem;
+  margin: 0 0.75rem;
+  border-bottom: 2px solid var(--ink);
+}
+.ci-plot > div { position: absolute; }
+.ci-unrecorded,
+.ci-key.ci-unrecorded {
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgb(11 31 58 / 0.12) 0 4px, transparent 4px 8px);
+}
+.ci-grid { top: 0; bottom: 0; width: 1px; background: rgb(11 31 58 / 0.1); }
+.ci-guide { left: 0; right: 0; border-top: 1px dashed rgb(11 31 58 / 0.45); }
+.ci-guide > span {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  font-size: 0.6875rem;
+  color: rgb(11 31 58 / 0.7);
+  background: rgb(255 255 255 / 0.8);
+  padding: 0 0.25rem;
+}
+.ci-bar {
+  bottom: 0;
+  width: 2.5%;
+  min-width: 5px;
+  max-width: 1.75rem;
+  transform: translateX(-50%);
+  border-radius: 3px 3px 0 0;
+}
+.ci-bar.ci-ok, .ci-key.ci-ok { background: var(--ci-ok); }
+.ci-bar.ci-late, .ci-key.ci-late { background: var(--ci-late); }
+.ci-bar.ci-first { background: rgb(11 31 58 / 0.35); }
+.ci-bar.ci-waiting { transform: translateX(-100%); }
+.ci-bar.ci-waiting, .ci-key.ci-waiting {
+  background: rgb(240 140 0 / 0.12);
+  border: 2px dashed var(--ci-late);
+  border-bottom: none;
+}
+/* Taller than the graph: a white break near the top shows it's cut off. */
+.ci-bar.ci-cut {
+  -webkit-mask: linear-gradient(to bottom, #000 0 5px, transparent 5px 8px, #000 8px);
+  mask: linear-gradient(to bottom, #000 0 5px, transparent 5px 8px, #000 8px);
+}
+.ci-plot > .ci-miss {
+  bottom: -0.7rem;
+  transform: translateX(-50%);
+  width: 1.3rem;
+  height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--red);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 2px solid #ffffff;
+  z-index: 1;
+}
+.ci-axis {
+  position: relative;
+  height: 1.25rem;
+  margin: 0.8rem 0.75rem 0;
+  font-size: 0.75rem;
+  color: rgb(11 31 58 / 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.ci-axis > span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ci-axis > span.ci-first { transform: none; }
+.ci-axis > span.ci-last { transform: translateX(-100%); }
+.ci-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1.5rem;
+  font-size: 0.8125rem;
+}
+.ci-legend li { display: flex; align-items: center; gap: 0.5rem; }
+.ci-key {
+  position: relative;
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.875rem;
+  border-radius: 2px 2px 0 0;
+}
+.ci-key.ci-unrecorded { width: 1rem; border: 1px solid rgb(11 31 58 / 0.3); }
+.ci-miss-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--red);
+  color: #ffffff;
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
+/* The Run status steps table (partials/run_steps.html): the state as a word,
+   with a coloured mark before it. */
+.step-word { font-weight: 600; white-space: nowrap; }
+.step-word::before {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: 0.35em;
+  border-radius: 50%;
+  background: rgb(11 31 58 / 0.4);
+}
+.step-ok::before { background: var(--green); }
+.step-new::before { background: var(--cobalt); }
+.step-failing::before { background: var(--red); }
+.step-silent::before { background: var(--amber); }
+
+/* An offline agent's card: the top band (name and tags) bleeds to the card's
+   edges with red diagonal lines, ending above the check-in lines, and a big
+   warning sign sits by the name. */
+.card-down {
+  margin: calc(-1 * var(--card-p, 1.5rem)) calc(-1 * var(--card-p, 1.5rem)) 0;
+  padding: var(--card-p, 1.5rem) var(--card-p, 1.5rem) 0.75rem;
+  background: repeating-linear-gradient(135deg, rgb(217 45 32 / 0.18) 0 6px, transparent 6px 14px);
+  border-bottom: 2px solid rgb(217 45 32 / 0.55);
+  border-radius: var(--radius-box) var(--radius-box) 0 0;
+}
+/* The warning by an offline agent's name: a solid red circle with a white
+   "!", ringed in white and navy so it stands out on the red shading. */
+.card-warn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--red);
+  color: #ffffff;
+  font-size: 1.5rem;
+  font-weight: 900;
+  line-height: 1;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px var(--ink), 2px 2px 0 2px var(--ink);
+  animation: warn-pulse 2s ease-in-out infinite;
+}
+@keyframes warn-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* Names that don't fit slide back and forth (ui.js sets the distance and
+   time), with a pause at each end; hovering stops them. Without motion
+   (reduced-motion setting), they end in "..." instead. */
+.marquee {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.marquee > span { display: inline-block; }
+.marquee.is-overflowing {
+  -webkit-mask: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+  mask: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+}
+.marquee.is-overflowing > span {
+  animation: marquee-slide var(--marquee-time, 6s) ease-in-out infinite alternate;
+}
+.marquee.is-overflowing:hover > span { animation-play-state: paused; }
+@keyframes marquee-slide {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee > span { display: inline; }
+  .marquee { text-overflow: ellipsis; }
+  .marquee.is-overflowing { -webkit-mask: none; mask: none; }
+  .marquee.is-overflowing > span, .card-warn { animation: none; }
+}
+
+/* The live feed (partials/live_feed.html, live_feed_body.html). Colours
+   follow the state pills. */
+
+/* Daily bars: one column per day, stacked Live (bottom), Needs attention,
+   Offline, No record; each slice is a link to those agents. */
+.lf-bars { display: flex; flex-direction: column; gap: 0.5rem; }
+.lf-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: 0.75rem; }
+.lf-legend li { display: flex; align-items: center; gap: 0.35rem; }
+.lf-key { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; }
+.lf-key-big { width: 1.25rem; height: 1.25rem; border-radius: 4px; }
+/* The chart: a y axis column, then the plot; the day labels in the row
+   under the plot use the same 14 columns, so they line up with the bars. */
+.lf-chart {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  grid-template-rows: 9rem auto;
+  column-gap: 0.4rem;
+  row-gap: 0.3rem;
+  margin-top: 0.75rem;
+}
+.lf-yaxis { position: relative; font-size: 0.6875rem; color: rgb(11 31 58 / 0.7); font-variant-numeric: tabular-nums; }
+.lf-yaxis > span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
+.lf-plot {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  column-gap: 0.3rem;
+  border-bottom: 2px solid var(--ink);
+}
+.lf-gridline { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgb(11 31 58 / 0.18); }
+.lf-col { position: relative; display: flex; align-items: flex-end; justify-content: center; height: 100%; min-width: 0; }
+.lf-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: 82%;
+  max-width: 3.5rem;
+}
+/* The count sits just above its bar, outside the plot's height, so it never changes the bar's size. */
+.lf-total {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding-bottom: 0.1rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.lf-part { flex-basis: 0; min-height: 3px; transition: filter 0.15s; }
+.lf-stack > .lf-part:last-child { border-radius: 3px 3px 0 0; }
+.lf-part:hover, .lf-part:focus-visible { filter: brightness(1.15) saturate(1.2); outline: 2px solid var(--ink); outline-offset: 1px; }
+.lf-live { background: var(--green); }
+.lf-attention { background: var(--amber); }
+.lf-offline { background: var(--red); }
+.lf-unknown { background: repeating-linear-gradient(135deg, rgb(11 31 58 / 0.25) 0 3px, rgb(11 31 58 / 0.06) 3px 7px); }
+.lf-days {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  column-gap: 0.3rem;
+  font-size: 0.6875rem;
+  color: rgb(11 31 58 / 0.7);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 40rem) {
+  .lf-days span:nth-child(odd):not(:last-child) { visibility: hidden; }
+}
+
+/* The five chips, each with a bubble under it (a tail pointing up at it). */
+.lf-cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+}
+.lf-cat { display: flex; flex-direction: column; min-width: 0; }
+.lf-chip {
+  --lf: var(--ink);
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.lf-chip strong { font-variant-numeric: tabular-nums; }
+.lf-next { font-size: 0.75rem; color: rgb(11 31 58 / 0.8); }
+.lf-chip-none { opacity: 0.55; }
+.lf-mark { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--lf); }
+.lf-chip-live { --lf: var(--green); }
+.lf-chip-attention { --lf: var(--amber); background: #fff4d6; }
+.lf-chip-offline { --lf: var(--red); background: #fde4e2; }
+.lf-chip-paused { --lf: var(--ink); }
+.lf-chip-paused .lf-mark { border-radius: 0; }
+.lf-chip-data { --lf: var(--cobalt); background: #e3ebff; }
+.lf-bubble {
+  position: relative;
+  flex: 1;
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  background: #ffffff;
+  border: 1px solid rgb(11 31 58 / 0.3);
+  border-top: 3px solid var(--lf, var(--ink));
+  border-radius: 8px;
+}
+.lf-bubble::before {
+  content: "";
+  position: absolute;
+  top: -0.55rem;
+  left: 1rem;
+  border: 0.45rem solid transparent;
+  border-top: 0;
+  border-bottom-color: var(--lf, var(--ink));
+}
+.lf-bubble-live { --lf: var(--green); }
+.lf-bubble-attention { --lf: var(--amber); }
+.lf-bubble-offline { --lf: var(--red); }
+.lf-bubble-paused { --lf: var(--ink); }
+.lf-bubble-data { --lf: var(--cobalt); }
+
+/* Inside a bubble, like a chat: the agent's "icon" (its name in a box, with a
+   person marker for its owner), and below it a one-row speech bubble whose
+   tail points up at it. Long text slides; clicking opens it in full. */
+.lf-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 15rem;  /* about 4 messages; the rest scrolls */
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  scrollbar-width: thin;
+}
+.lf-msg { display: flex; flex-direction: column; align-items: flex-start; gap: 0.45rem; min-width: 0; font-size: 0.75rem; }
+/* The name box and, beside it, "by: <owner>" in small grey letters. */
+.lf-head { display: flex; align-items: center; gap: 0.4rem; max-width: 100%; min-width: 0; }
+.lf-by {
+  flex: 0 1 auto;
+  min-width: 2.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  color: rgb(11 31 58 / 0.6);
+}
+.lf-avatar {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.15rem 0.3rem 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid rgb(11 31 58 / 0.35);
+  font-weight: 700;
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+.lf-person {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgb(11 31 58 / 0.35);
+  color: var(--ink);
+}
+.lf-says {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+  margin-left: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 8px;
+  background: rgb(11 31 58 / 0.06);
+  border: 1px solid rgb(11 31 58 / 0.15);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.lf-says[role="button"]:hover { background: rgb(11 31 58 / 0.1); }
+.lf-says[role="button"]:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* The agent's name inside the text: a link to its page. */
+.lf-link { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.lf-link:hover { text-decoration-thickness: 2px; }
+/* The tail, pointing up at the name box. */
+.lf-says::before {
+  content: "";
+  position: absolute;
+  top: -0.4rem;
+  left: 0.75rem;
+  border: 0.35rem solid transparent;
+  border-top: 0;
+  border-bottom-color: rgb(11 31 58 / 0.25);
+}
+.lf-text { flex: 1; min-width: 0; }
+/* Opened: the whole text, wrapped, without sliding. */
+.lf-says.lf-open .lf-text { white-space: normal; -webkit-mask: none; mask: none; }
+.lf-says.lf-open .lf-text > span { animation: none; transform: none; display: inline; }
+/* "Typing": a dashed bubble with three dots bouncing in turn, until the run comes in. */
+.lf-typing .lf-says { cursor: default; background: rgb(11 31 58 / 0.04); border-style: dashed; }
+.lf-dots { display: inline-flex; gap: 0.2rem; padding: 0.2rem 0; }
+.lf-dots i {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: rgb(11 31 58 / 0.55);
+  animation: lf-bounce 1.2s ease-in-out infinite;
+}
+.lf-dots i:nth-child(2) { animation-delay: 0.15s; }
+.lf-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes lf-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-0.25rem); opacity: 1; }
+}
+/* How lines move when the feed reloads (View Transitions): slide, fade in,
+   fade out. Only the feed's lines move: the page itself (the "root") is not
+   cross-faded, so text elsewhere on the page doesn't flicker. */
+::view-transition-group(*) { animation-duration: 0.45s; animation-timing-function: ease-in-out; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-group(root) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lf-dots i { animation: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+.lf-times {
+  flex-shrink: 0;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--lf, var(--ink));
+  color: #ffffff;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.lf-bubble-attention .lf-times { color: var(--ink); }
+
 /* The pulsing "online" light. */
 .live-dot::before {
   content: "";

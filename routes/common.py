@@ -25,6 +25,7 @@ from db import (
     CourseEnrolledUser,
     CourseHiddenGen,
     CourseHiddenUser,
+    CheckInSpan,
     Event,
     FeedFilter,
     Gen,
@@ -219,7 +220,7 @@ def delete_agent(db: Session, agent: Agent) -> None:
         delete_stored_file(db, file_id)
     for tree in db.exec(select(SkillTree).where(SkillTree.agent_id == agent.id)).all():
         market.delete_tree(db, tree)
-    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter):
+    for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter, CheckInSpan):
         db.exec(delete(model).where(model.agent_id == agent.id))
     # Skills it shared stay on the market, still credited to it by name.
     for skill in db.exec(select(Skill).where(Skill.agent_id == agent.id)).all():

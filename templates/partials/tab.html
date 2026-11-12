@@ -25,6 +25,12 @@
   </div>
   {% endif %}
 
+  {% if tab == "agents" %}
+  {# Members get the live feed (its chips carry the counts); guests the summary line. #}
+  {% import "partials/agent_state.html" as states %}
+  {% if viewer.is_member %}{% include "partials/live_feed.html" %}{% else %}{{ states.summary_line(state_summary) }}{% endif %}
+  {% endif %}
+
   <div class="space-y-2">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2 class="section-title font-semibold">{{ "Agents" if tab == "agents" else "Students" }}</h2>

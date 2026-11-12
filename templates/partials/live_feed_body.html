@@ -1,0 +1,97 @@
+{# The live feed's body: the daily bars, then the five chips with their bubbles. #}
+{% import "partials/agent_state.html" as states %}
+{% import "partials/icons.html" as icon %}
+{# An agent's "icon": its name in a box (sliding if long) and a little person
+   marker on the right, which stays put; beside the box, "by: <its owner>". #}
+{% macro avatar(agent, owner, state, link=True) -%}
+<span class="lf-head">
+  <{{ 'a href="/agents/%d"' % agent.id if link else 'span' }} class="lf-avatar {{ states.name_colour(state) if state }}">
+    <span data-marquee class="marquee min-w-0 flex-1"><span>{{ agent.name }}</span></span>
+    <span class="lf-person" title="{{ who(owner) if owner else '' }}" aria-hidden="true">{{ icon.person() }}</span>
+  </{{ 'a' if link else 'span' }}>
+  {% if owner %}<span class="lf-by" title="{{ who(owner) }}">by: {{ who(owner) }}</span>{% endif %}
+</span>
+{%- endmacro %}
+<div class="space-y-6">
+  {# Daily bars: height = agents due that day; slices = the worst state each was in. #}
+  <figure class="lf-bars" aria-labelledby="lf-bars-title">
+    <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <figcaption id="lf-bars-title" class="text-sm font-semibold">Agents due each day
+        <span class="font-normal text-base-content/70">&middot; last 14 days &middot; click a slice to see those agents</span></figcaption>
+      <ul class="lf-legend" aria-hidden="true">
+        <li><span class="lf-key lf-live"></span>Live</li>
+        <li><span class="lf-key lf-attention"></span>Needs attention</li>
+        <li><span class="lf-key lf-offline"></span>Offline</li>
+        <li><span class="lf-key lf-unknown"></span>No record</li>
+      </ul>
+    </div>
+    {# The y axis (agents due) and the bars share one grid, so each bar's
+       height matches its axis and each day's label sits under its bar. #}
+    <div class="lf-chart">
+      <div class="lf-yaxis" aria-hidden="true">
+        {% for tick in feed_bar_ticks %}<span style="bottom: {{ '%.3f' % (tick / feed_bar_top * 100) }}%">{{ tick }}</span>{% endfor %}
+      </div>
+      <div class="lf-plot">
+        {% for tick in feed_bar_ticks %}<span class="lf-gridline" style="bottom: {{ '%.3f' % (tick / feed_bar_top * 100) }}%"></span>{% endfor %}
+        {% for bar in feed_bars %}
+        <div class="lf-col">
+          <div class="lf-stack" style="height: {{ '%.3f' % (bar.total / feed_bar_top * 100) }}%">
+            {% if bar.total %}<span class="lf-total">{{ bar.total }}</span>{% endif %}
+            {% for key, words, ids in bar.parts %}
+            <a class="lf-part lf-{{ key }}" style="flex-grow: {{ ids | length }}"
+               href="/classes/{{ feed_course_id }}/agents-by-state?day={{ bar.day }}&state={{ key }}"
+               title="{{ bar.label }}: {{ ids | length }} {{ words | lower }} (of {{ bar.total }} due)"
+               aria-label="{{ bar.day }}: {{ ids | length }} {{ words | lower }}"></a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <span></span>
+      <div class="lf-days" aria-hidden="true">
+        {% for bar in feed_bars %}<span class="{{ 'font-semibold' if loop.last }}" title="{{ bar.weekday }}">{{ bar.label }}</span>{% endfor %}
+      </div>
+    </div>
+  </figure>
+
+  {# The five chips, each with a chat-style bubble: the agent's name in a box,
+     what happened in a little speech bubble beside it, "x2" for repeats. #}
+  <ul class="lf-cats">
+    {% for c in feed_categories %}
+    <li class="lf-cat">
+      <span class="lf-chip lf-chip-{{ c.key }} {{ 'lf-chip-none' if not c.count }}">
+        <span class="lf-mark" aria-hidden="true"></span>{{ c.label }} <strong>{{ c.count_text }}</strong>
+        {% if c.countdown %}<span class="lf-next">&middot; next run <span class="font-mono" data-countdown="{{ c.countdown }}" data-refresh>--:--:--</span></span>{% endif %}
+      </span>
+      <div class="lf-bubble lf-bubble-{{ c.key }}">
+        {% if c.entries or c.typing %}
+        <ul class="lf-chat">
+          {% for t in c.typing %}
+          {# Due now, not in yet: "typing" until it lands in one of the bubbles. #}
+          <li class="lf-msg lf-typing" style="view-transition-name: lf-{{ c.key }}-t{{ t.agent.id }}">
+            {{ avatar(t.agent, t.owner, t.state) }}
+            <span class="lf-says" title="{{ t.agent.name }}: due now, waiting for its run"><span class="lf-dots" aria-label="waiting"><i></i><i></i><i></i></span></span>
+          </li>
+          {% endfor %}
+          {% for e in c.entries %}
+          <li class="lf-msg" style="view-transition-name: lf-{{ c.key }}-{{ e.agent.id }}">
+            {{ avatar(e.agent, e.owner, e.state) }}
+            {# One row; long text slides. Click it to open it in full (and again to
+               close); the agent's name in it is a link to its page. #}
+            <div class="lf-says" role="button" tabindex="0" x-data="{ open: false }"
+                 @click="open = !open" @keydown.enter.prevent="open = !open" @keydown.space.prevent="open = !open"
+                 :class="{ 'lf-open': open }" :aria-expanded="open" title="Click to show it all">
+              <span data-marquee class="marquee lf-text"><span><a href="/agents/{{ e.agent.id }}" class="lf-link {{ states.name_colour(e.state) if e.state }}" @click.stop>{{ e.agent.name }}</a> {% if e.countdown %}next run <span class="font-mono" data-countdown="{{ e.countdown }}" data-refresh>--:--:--</span>{% else %}{{ e.message }}{% endif %}</span></span>
+              {% if e.count > 1 %}<strong class="lf-times">&times;{{ e.count }}</strong>{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-xs text-base-content/60">Nothing yet</p>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>

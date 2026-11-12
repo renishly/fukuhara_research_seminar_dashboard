@@ -31,7 +31,7 @@ from sqlmodel import Session
 import storage
 import market
 from db import create_db_and_tables, engine
-from routes import agent_api, agents, auth, classes, coursework, members, skills, skills_api
+from routes import agent_api, agents, auth, classes, coursework, live_feed, members, skills, skills_api
 from web import BASE_DIR, alert_html, templates
 
 
@@ -88,7 +88,7 @@ app.add_middleware(
 # The order matters where addresses look alike: e.g. POST /classes/1/agents
 # (agents.py) or /classes/1/skills (skills.py) must be found before
 # /classes/1/{assignments or exams} (coursework.py), so coursework comes last.
-for module in (auth, classes, agents, skills, skills_api, agent_api, members, coursework):
+for module in (auth, classes, agents, live_feed, skills, skills_api, agent_api, members, coursework):
     app.include_router(module.router)
 
 

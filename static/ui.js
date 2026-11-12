@@ -288,3 +288,70 @@ document.addEventListener("click", (event) => {
     setTimeout(() => event.target.querySelectorAll("[data-dropzone]").forEach(showList), 0);
   });
 })();
+
+// Agent names on cards stay on one line ([data-marquee]): a name too long for
+// its space slides slowly back and forth so all of it can be read, while the
+// tags beside it stay put. Measured again after every HTMX refresh and when
+// the window is resized.
+(function () {
+  function measure(root) {
+    (root || document).querySelectorAll("[data-marquee]").forEach((box) => {
+      const inner = box.firstElementChild;
+      if (!inner) return;
+      const distance = inner.scrollWidth - box.clientWidth;
+      const overflowing = distance > 2;
+      box.classList.toggle("is-overflowing", overflowing);
+      if (overflowing) {
+        box.style.setProperty("--marquee-distance", distance + 8 + "px");
+        // About 30 pixels a second, plus the pauses at each end.
+        box.style.setProperty("--marquee-time", Math.max(4, distance / 30 + 3) + "s");
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", () => measure());
+  document.addEventListener("htmx:afterSettle", (event) => measure(event.target));
+  let resizing;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizing);
+    resizing = setTimeout(() => measure(), 150);
+  });
+})();
+
+// Countdowns ([data-countdown] = an ISO time): hh:mm:ss until then, ticking
+// every second; "due now" once it's passed. Picks up new ones after each
+// HTMX refresh by looking them up on every tick.
+(function () {
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function tick() {
+    const now = Date.now();
+    document.querySelectorAll("[data-countdown]").forEach((el) => {
+      const left = Math.round((Date.parse(el.dataset.countdown) - now) / 1000);
+      if (Number.isNaN(left)) return;
+      if (left <= 0) {
+        el.textContent = "due now";
+        // A run is due: reload the live feed once, so its "typing" lines appear.
+        if (el.hasAttribute("data-refresh") && !el.dataset.fired) {
+          el.dataset.fired = "1";
+          const feed = document.getElementById("live-feed-body");
+          if (feed && window.htmx) htmx.trigger(feed, "lf-refresh");
+        }
+        return;
+      }
+      const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+      el.textContent = (h >= 100 ? h : pad(h)) + ":" + pad(m) + ":" + pad(s);
+    });
+  }
+  // While someone is "typing" in the live feed, check every 5 seconds whether it came in.
+  let lastTypingCheck = Date.now();
+  function watchTyping() {
+    const feed = document.getElementById("live-feed-body");
+    if (!feed || !window.htmx || !feed.querySelector(".lf-typing")) { lastTypingCheck = Date.now(); return; }
+    if (Date.now() - lastTypingCheck >= 5000 && document.visibilityState === "visible") {
+      lastTypingCheck = Date.now();
+      htmx.trigger(feed, "lf-refresh");
+    }
+  }
+  document.addEventListener("DOMContentLoaded", tick);
+  document.addEventListener("htmx:afterSettle", tick);
+  setInterval(() => { tick(); watchTyping(); }, 1000);
+})();

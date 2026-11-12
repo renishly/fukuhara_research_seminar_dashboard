@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "partials/agent_state.html" as states %}
+{% block title %}{{ state_words }} on {{ bar.label }} · {{ course.title }}{% endblock %}
+{% block content %}
+{# The agents in one slice of the live feed's daily bars (routes/live_feed.py),
+   whoever owns them: e.g. everyone's agents that were offline on 11/10. #}
+<main class="mx-auto max-w-6xl space-y-6 px-4 py-8">
+  <header class="space-y-1">
+    <a href="/classes/{{ course.id }}?tab=agents" class="btn btn-ghost btn-sm -ml-3">&larr; {{ course.title }}</a>
+    <p class="text-sm text-base-content/70">Agents due on {{ bar.day }} ({{ bar.weekday }}), by their worst state that day</p>
+    <h1 class="page-title flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+      <span class="lf-key lf-{{ state_key }} lf-key-big" aria-hidden="true"></span>{{ state_words }}
+      <span class="text-xl font-normal text-base-content/70">{{ cards | length }} of {{ bar.total }} agent{{ "s" if bar.total != 1 }}</span>
+    </h1>
+  </header>
+  {% if cards %}
+  <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    {% for c in cards %}
+    <a href="/agents/{{ c.agent.id }}" class="card lift">
+      <div class="card-body gap-2">
+        <p class="text-xs text-base-content/70">{{ who(c.owner) if c.owner }}</p>
+        <div class="flex flex-nowrap items-center gap-x-3">
+          <span data-marquee class="card-title marquee min-w-0 flex-1 {{ states.name_colour(c.state) }}"><span>{{ c.agent.name }}</span></span>
+          <span class="flex shrink-0 items-center gap-1">{{ states.rhythm(c.state) }}{{ states.pill(c.state, detail=True) }}</span>
+        </div>
+        <p class="text-xs text-base-content/70">Now:</p>
+        {{ states.lines(c.state) }}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-base-content/70">No agents in this slice.</p>
+  {% endif %}
+</main>
+{% endblock %}

@@ -39,7 +39,8 @@ from permissions import (
     visible_courses,
 )
 import market
-from routes.agent_tools import is_online
+from routes.agent_tools import ago, states_for
+from routes.live_feed import feed_context, summary, sync_all
 from routes.common import (
     delete_course,
     gens_by_id,
@@ -357,16 +358,27 @@ def coursework_window(db: Session, viewer: Viewer, course: Course, kind: str) ->
 
 
 def agents_window(db: Session, viewer: Viewer, course: Course) -> dict:
-    """The Agents tab: when each student's agents in this class last connected."""
-    agents = db.exec(select(Agent).where(Agent.course_id == course.id)).all()
+    """The Agents tab: how many of each student's agents in this class are
+    live, out of all of them, and when one last connected."""
+    agents = list(db.exec(select(Agent).where(Agent.course_id == course.id)).all())
     groups = student_groups(db, viewer, course)
+    now = utc_now()
+    states = states_for(db, agents, now)
+    sync_all(db, agents, states, now)
+    shown = []  # the agents of the students this viewer can see in the window
     for group in groups:
         for cell in group.cells:
             mine = [agent for agent in agents if agent.owner_id == cell["student"].id]
+            shown += mine
             seen = [agent.last_seen_at for agent in mine if agent.last_seen_at]
             cell["last_connected"] = max(seen) if seen else None
-            cell["online"] = any(is_online(agent) for agent in mine)
-    return {"groups": groups}
+            cell["last_connected_ago"] = ago(max(seen), now) if seen else None
+            cell["agent_count"] = len(mine)
+            cell["live_count"] = sum(states[agent.id].key == "live" for agent in mine)
+    context = {"groups": groups, "state_summary": summary(states, [agent.id for agent in shown])}
+    if viewer.is_member:
+        context |= feed_context(db, shown, states, course.id)
+    return context
 
 
 def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skill: int | None = None) -> dict:
