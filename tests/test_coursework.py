@@ -122,7 +122,7 @@ def test_due_indicator():
 
 
 def test_bar_shows_the_latest_task_with_its_indicator(admin, taro, course):
-    assert "No assignments yet" in taro.get(f"/classes/{course}").text
+    assert "No assignments yet" in taro.get(f"/classes/{course}", params={"tab": "assignments"}).text
     post_task(admin, course, title="Old one", hours=-5)
     bar = taro.get(f"/classes/{course}/bar/assignments").text
     assert "Old one" in bar and "Past due" in bar
@@ -581,7 +581,9 @@ def test_pdfs_html_and_text_can_be_previewed(engine, admin, taro, course):
     html_page = preview_of(admin, engine, "page.html")
     policy = html_page.headers["content-security-policy"]
     assert html_page.headers["content-type"].startswith("text/html")
-    assert policy.startswith("sandbox;") and "script-src" not in policy and "default-src 'none'" in policy
+    # Its own scripts may run, but sandboxed (a separate, unknown site) and with no internet ("default-src 'none'").
+    assert policy.startswith("sandbox allow-scripts;") and "allow-same-origin" not in policy
+    assert "default-src 'none'" in policy and "connect-src" not in policy
     text = preview_of(admin, engine, "notes.md")
     assert text.headers["content-type"].startswith("text/plain") and text.content == b"# Notes"
     assert "sandbox" in text.headers["content-security-policy"]
@@ -598,3 +600,14 @@ def test_a_fake_pdf_is_not_previewed(engine, admin, taro, course):
 def test_previews_follow_download_permissions(engine, make_person, taro, course):
     submit(taro, course, file=("private.pdf", b"%PDF-1.4 x", "application/pdf"))  # not ticked for guests
     assert preview_of(make_person("guest"), engine, "private.pdf").status_code == 404
+
+
+def test_csv_shows_as_a_table_and_json_laid_out(engine, admin, taro, course):
+    submit(taro, course, title="C", file=("data.csv", b"name,score\n<b>Ann</b>,3\nBo,10\n", "text/csv"))
+    submit(taro, course, title="J", file=("out.json", b'{"a":1,"b":[2,3]}', "application/json"))
+    table = preview_of(admin, engine, "data.csv")
+    assert table.headers["content-type"].startswith("text/html") and "<th>score</th>" in table.text
+    assert "&lt;b&gt;Ann&lt;/b&gt;" in table.text and "<b>Ann</b>" not in table.text  # cells are escaped
+    assert "sandbox" in table.headers["content-security-policy"]
+    laid_out = preview_of(admin, engine, "out.json")
+    assert laid_out.headers["content-type"].startswith("text/plain") and laid_out.text.startswith('{\n  "a": 1')

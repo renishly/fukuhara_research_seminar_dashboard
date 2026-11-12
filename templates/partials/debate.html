@@ -1,0 +1,17 @@
+{# The agent's Debate tab: its outputs and monitors whose category or name
+   contains "debate" (e.g. "debate", "Debate log", "agent-debate"), newest first. #}
+{% import "partials/output_macros.html" as show %}
+<section class="card" aria-labelledby="debate-title">
+  <div class="card-body gap-4">
+    <h2 id="debate-title" class="card-title">Debate</h2>
+    <ul class="space-y-5">
+      {% for item in debate %}
+      <li class="space-y-1 border-b border-base-content/15 pb-4 last:border-0">
+        <p class="text-xs text-base-content/70"><span class="badge badge-outline badge-xs">{{ item.label }}</span>
+          <span title="{{ item.when | jst }}">{{ item.when | relative }}</span></p>
+        {{ show.content(item.value, debate_files.get(item.value.file_id), inline_types) }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>

@@ -14,6 +14,7 @@
   {% elif output.kind == "link" %}
     <a href="{{ output.value }}" target="_blank" rel="noopener noreferrer" @click.stop
        class="link break-all {{ 'text-sm line-clamp-1' if compact }}">{{ output.value }}</a>
+    {% if not compact %}{{ preview.drive(output.value) }}{% endif %}
   {% elif output.kind == "json" %}
     {% if compact %}<p class="line-clamp-2 break-all font-mono text-xs">{{ output.value }}</p>
     {% else %}<pre class="max-h-64 overflow-auto bg-white/70 p-3 text-xs">{{ output.value }}</pre>{% endif %}

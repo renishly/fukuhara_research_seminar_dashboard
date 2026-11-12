@@ -1,10 +1,12 @@
 {% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
 {% import "partials/content.html" as content %}
 {% block title %}{{ kinds | capitalize }} · {{ mask(course_name(course)) }}{% endblock %}
 {% block content %}
 <main class="mx-auto max-w-4xl space-y-8 px-4 py-8">
   <header class="space-y-2">
-    <a href="/classes/{{ course.id }}?tab={{ kinds }}" class="btn btn-ghost btn-sm -ml-3">&larr; {{ mask(course_name(course)) }}</a>
+    {{ nav.crumbs([("Classes", "/classes"), (mask(course_name(course)), "/classes/%d?tab=%s" % (course.id, kinds)),
+                   (kinds | capitalize, None)]) }}
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h1 class="page-title text-3xl font-bold tracking-tight">{{ kinds | capitalize }}</h1>
       {% if can_manage %}

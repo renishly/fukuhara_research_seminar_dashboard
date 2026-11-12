@@ -126,10 +126,22 @@ def test_login_needs_no_key_and_uses_the_login_id(client, session, make_person):
     make_person("student", "Taro", "Yamada Taro")
     browser = TestClient(app)
     response = browser.post("/login", data={"login_id": "TARO", "password": PASSWORD}, follow_redirects=False)
-    assert response.status_code == 303 and response.headers["location"] == "/classes"
+    assert response.status_code == 303 and response.headers["location"] == "/"
     assert SESSION_COOKIE in response.cookies
+    # No class visited yet: the home page is the classes calendar.
+    assert browser.get("/", follow_redirects=False).headers["location"] == "/classes"
     page = browser.get("/classes")
     assert page.status_code == 200 and "Yamada Taro" in page.text
+
+
+def test_home_opens_the_last_class_visited(make_person, create_class):
+    taro = make_person("student", "taro", gen=9)
+    first, second = create_class(enrolled_gens=[9]), create_class(enrolled_gens=[9])
+    taro.get(f"/classes/{first}")
+    taro.get(f"/classes/{second}")
+    assert taro.get("/", follow_redirects=False).headers["location"] == f"/classes/{second}"
+    taro.get(f"/classes/{first}")
+    assert taro.get("/", follow_redirects=False).headers["location"] == f"/classes/{first}"
 
 
 def test_login_failure_never_says_which_part_was_wrong(client, make_person):

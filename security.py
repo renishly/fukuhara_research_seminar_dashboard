@@ -213,10 +213,11 @@ class Viewer:
 
 
 def safe_next(next_page: str | None) -> str:
-    """Where to go after signing in: only a page on this site (never another website)."""
+    """Where to go after signing in: only a page on this site (never another
+    website). By default the home page, which opens the last class visited."""
     if next_page and next_page.startswith("/") and not next_page.startswith("//") and "\\" not in next_page:
         return next_page
-    return "/classes"
+    return "/"
 
 
 def _not_signed_in(request: Request) -> HTTPException:

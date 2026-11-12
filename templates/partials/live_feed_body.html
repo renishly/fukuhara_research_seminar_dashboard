@@ -3,12 +3,12 @@
 {% import "partials/icons.html" as icon %}
 {# An agent's "icon": its name in a box (sliding if long) and a little person
    marker on the right, which stays put; beside the box, "by: <its owner>". #}
-{% macro avatar(agent, owner, state, link=True) -%}
+{% macro avatar(agent, owner, state) -%}
 <span class="lf-head">
-  <{{ 'a href="/agents/%d"' % agent.id if link else 'span' }} class="lf-avatar {{ states.name_colour(state) if state }}">
+  <a href="/agents/{{ agent.id }}" class="lf-avatar {{ states.name_colour(state) if state }}" title="Open {{ agent.name }}">
     <span data-marquee class="marquee min-w-0 flex-1"><span>{{ agent.name }}</span></span>
     <span class="lf-person" title="{{ who(owner) if owner else '' }}" aria-hidden="true">{{ icon.person() }}</span>
-  </{{ 'a' if link else 'span' }}>
+  </a>
   {% if owner %}<span class="lf-by" title="{{ who(owner) }}">by: {{ who(owner) }}</span>{% endif %}
 </span>
 {%- endmacro %}

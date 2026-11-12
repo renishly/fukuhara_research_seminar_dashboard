@@ -168,6 +168,7 @@ def test_bubbles_list_the_latest_agents_per_kind_joining_repeats(engine, client,
     assert 'class="lf-person" title="Yamada Taro"' in paused  # whose agent it is: the person marker
     assert ">by: Yamada Taro<" in paused  # and in words beside the box
     assert f'href="/agents/{agent}" class="lf-link' in paused  # the name in the text links to the agent
+    assert f'<a href="/agents/{agent}" class="lf-avatar' in paused  # and so does its name box
     data = body[body.index("lf-bubble-data"):]
     assert "<span>park</span>" in data and "1 in 24 h" in body
     offline = body[body.index("lf-bubble-offline"):body.index("lf-bubble-paused")]

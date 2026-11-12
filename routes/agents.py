@@ -29,6 +29,7 @@ from db import (
     Output,
     StoredFile,
     User,
+    as_utc,
     get_session,
     utc_now,
 )
@@ -552,6 +553,24 @@ def inbox_context(db: Session, agent: Agent, error: str | None = None, notice: s
             "inbox_error": error, "inbox_notice": notice, "inbox_max": human_size(INBOX_FILE_LIMIT)}
 
 
+DEBATE_ITEMS = 20
+
+
+def debate_context(db: Session, agent: Agent) -> dict:
+    """The Debate tab's items: outputs and monitors whose category or name
+    contains "debate" (any case), newest first. Empty: no Debate tab."""
+    outputs = db.exec(select(Output).where(Output.agent_id == agent.id, func.lower(Output.category).contains("debate"))
+                      .order_by(Output.created_at.desc()).limit(DEBATE_ITEMS)).all()
+    monitors = db.exec(select(Monitor).where(Monitor.agent_id == agent.id, func.lower(Monitor.name).contains("debate"))
+                       ).all()
+    items = [{"label": o.category, "when": o.created_at, "value": o} for o in outputs]
+    items += [{"label": m.name, "when": m.updated_at, "value": m} for m in monitors]
+    items.sort(key=lambda item: as_utc(item["when"]), reverse=True)
+    items = items[:DEBATE_ITEMS]
+    return {"debate": items, "debate_files": file_details(db, [i["value"].file_id for i in items if i["value"].file_id]),
+            "inline_types": INLINE_TYPES}
+
+
 @router.get("/agents/{agent_id}")
 def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current_viewer),
                db: Session = Depends(get_session)):
@@ -561,6 +580,7 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
     agent = viewable_agent(db, viewer, agent_id)
     context = header_context(db, viewer, agent) | both_feeds(db, viewer, agent)
     context["activity"] = checkin_activity(db, agent, context["state"].rhythm)
+    context |= debate_context(db, agent)
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}
     course = db.get(Course, agent.course_id)

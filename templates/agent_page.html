@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
 {% import "partials/icons.html" as icon %}
 {% import "partials/dropzone.html" as drop %}
 {% block title %}{{ agent.name }} · Agent{% endblock %}
@@ -8,18 +9,38 @@
    and in a bar fixed to the bottom of the screen on phones. #}
 <main class="mx-auto max-w-6xl px-4 py-8 {{ 'pb-32 lg:pb-8' if is_owner }}">
   <div class="mb-8">
-    <a href="{{ back_url }}" class="btn btn-ghost btn-sm -ml-3 mb-2">&larr; {{ who(owner) }}'s agents</a>
+    <div class="mb-2">{{ nav.crumbs([("Classes", "/classes"), (mask(course_name(course)), "/classes/%d?tab=agents" % course.id),
+                                     (who(owner), back_url), (agent.name, None)]) }}</div>
     {% include "partials/agent_header.html" %}
   </div>
 
   <div class="{{ 'lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-8' if is_owner }}">
-    <div class="min-w-0 space-y-8">
-      {% include "partials/run_steps.html" %}
-      {% include "partials/checkin_graph.html" %}
+    {# Tabs (Rin's proposal): one section at a time, under the header. The tab
+       is kept in the address (#outputs...), so a link can open it. Debate only
+       for agents that post debate results. #}
+    {% set tabs = [("overview", "Overview"), ("monitors", "Monitors"), ("outputs", "Outputs")]
+                  + ([("debate", "Debate")] if debate else []) + [("activity", "Activity")] %}
+    <div class="min-w-0 space-y-6"
+         x-data="{ tab: 'overview', names: {{ tabs | map('first') | list | tojson | forceescape }},
+                   pick(name) { this.tab = name; history.replaceState(null, '', '#' + name); } }"
+         x-init="const asked = location.hash.slice(1); if (names.includes(asked)) tab = asked">
+      <div role="tablist" class="tabs tabs-box w-fit max-w-full overflow-x-auto" aria-label="Agent sections">
+        {% for name, label in tabs %}
+        <button type="button" role="tab" class="tab" :class="{ 'tab-active': tab === '{{ name }}' }"
+                :aria-selected="tab === '{{ name }}'" @click="pick('{{ name }}')">{{ label }}</button>
+        {% endfor %}
+      </div>
+      <div x-show="tab === 'overview'" class="space-y-8">
+        {% include "partials/run_steps.html" %}
+        {% include "partials/checkin_graph.html" %}
+      </div>
       {# Monitors (datapoints kept up to date) and Outputs (one-off results). #}
-      {% with f=monitors_feed %}{% include "partials/feed.html" %}{% endwith %}
-      {% with f=outputs_feed %}{% include "partials/feed.html" %}{% endwith %}
-      <section class="card">
+      <div x-show="tab === 'monitors'" x-cloak>{% with f=monitors_feed %}{% include "partials/feed.html" %}{% endwith %}</div>
+      <div x-show="tab === 'outputs'" x-cloak>{% with f=outputs_feed %}{% include "partials/feed.html" %}{% endwith %}</div>
+      {% if debate %}
+      <div x-show="tab === 'debate'" x-cloak>{% include "partials/debate.html" %}</div>
+      {% endif %}
+      <section class="card" x-show="tab === 'activity'" x-cloak>
         <div class="card-body gap-4">
           <h2 class="card-title">Activity</h2>
           <div hx-get="/agents/{{ agent.id }}/events" hx-trigger="load, every 10s [document.visibilityState === 'visible']"

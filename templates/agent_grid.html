@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
 {% block title %}{{ who(owner) }}'s agents · {{ mask(course_name(course)) }}{% endblock %}
 {% block content %}
 {% set folder_param = "&folder=%d" % current_folder.id if current_folder else "" %}
@@ -22,7 +23,9 @@
   <div class="drawer-content">
     <main class="mx-auto max-w-6xl space-y-6 px-4 py-8">
       <header class="space-y-2">
-        <a href="/classes/{{ course.id }}?tab=agents" class="btn btn-ghost btn-sm -ml-3">&larr; {{ mask(course_name(course)) }}</a>
+        {{ nav.crumbs([("Classes", "/classes"), (mask(course_name(course)), "/classes/%d?tab=agents" % course.id),
+                       (who(owner), "/classes/%d/agents/%d" % (course.id, owner.id) if current_folder else None)]
+                      + ([(current_folder.name, None)] if current_folder else [])) }}
         {% if viewer.is_member %}
         <div>
           <label for="folder-sidebar" class="btn btn-ghost btn-sm -ml-3 lg:hidden">&#9776; Folders</label>

@@ -317,3 +317,21 @@ def test_hidden_exam_submissions_dont_mark_the_class_as_new(engine, admin, make_
     assert 'class="tl-new"' not in admin.get("/classes").text  # the exam submission is hidden
     admin.post(f"/classes/{course}/edit", data=class_form(engine, enrolled_gens=[9]))
     assert 'class="tl-new"' in admin.get("/classes").text  # and counts again once Exams is back
+
+
+def test_a_class_opens_on_agents_if_it_has_that_tab(admin, create_class):
+    with_agents, without = create_class(), create_class(has_agents=False)
+    page = admin.get(f"/classes/{with_agents}").text
+    agents_tab = page[page.index(f'href="/classes/{with_agents}?tab=agents"'):]
+    assert agents_tab.index('aria-selected="true"') < agents_tab.index("Agents</a>")
+    assert "No assignments yet" in admin.get(f"/classes/{without}").text
+
+
+def test_my_agents_are_one_click_from_the_class_page(make_person, create_class, create_agent):
+    taro, hanako = make_person("student", "taro", gen=9), make_person("student", "hanako", gen=9)
+    course = create_class(enrolled_gens=[9])
+    agent = create_agent(taro, course, "helper")
+    page = taro.get(f"/classes/{course}").text
+    assert 'aria-label="My agents"' in page and f'href="/agents/{agent}" class="my-agent' in page
+    assert 'aria-label="My agents"' not in hanako.get(f"/classes/{course}").text  # she has none
+    assert 'aria-label="Breadcrumb"' in page

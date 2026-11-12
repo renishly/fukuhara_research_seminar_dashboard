@@ -879,3 +879,23 @@ def test_connector_shares_reads_and_trees_skills(engine, connector):
     assert connector.read_skill_tree(agent_id)["view"] is None
     assert connector.delete_skill(info["identifier"]) is True
     assert connector.read_skill(info["identifier"]) is None  # gone: a warning, not an error
+
+
+def test_google_drive_links_get_a_preview():
+    from uploads import drive_preview_url
+    assert drive_preview_url("https://drive.google.com/file/d/AbC_1-x/view?usp=sharing") == \
+        "https://drive.google.com/file/d/AbC_1-x/preview"
+    assert drive_preview_url("https://docs.google.com/spreadsheets/d/XyZ/edit#gid=0") == \
+        "https://docs.google.com/spreadsheets/d/XyZ/preview"
+    assert drive_preview_url("https://example.com/file/d/x") is None
+    assert drive_preview_url("javascript:alert(1)") is None
+
+
+def test_agent_page_has_tabs_and_debate_only_when_it_debates(client, taro, hanako, course, create_agent):
+    agent = create_agent(taro, course, "helper")
+    page = hanako.get(f"/agents/{agent}").text
+    assert 'aria-label="Agent sections"' in page and "Overview</button>" in page and "Activity</button>" in page
+    assert "Debate</button>" not in page  # it hasn't posted any debate
+    client.post("/api/outputs", json={"category": "Agent debate", "content": "Bull 0.6 vs Bear 0.4"}, headers=api("helper"))
+    page = hanako.get(f"/agents/{agent}").text
+    assert "Debate</button>" in page and "Bull 0.6 vs Bear 0.4" in page

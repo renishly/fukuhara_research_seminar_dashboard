@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
-from db import Gen, User, get_session, utc_now
+from db import ClassVisit, Course, Gen, User, get_session, utc_now
+from permissions import can_view_course
 from names import MAX_OTHER_NAMES, assign_guest_number, split_other_names
 from security import (
     MIN_PASSWORD_LENGTH,
@@ -93,8 +94,25 @@ def signed_in_response(request: Request, db: Session, user: User | None, next_pa
 
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_session)):
-    """Signed in (as a member or a guest): the classes. Otherwise: the login page."""
-    return RedirectResponse("/classes" if find_viewer(request, db) else "/login", status_code=303)
+    """Signed in: the class this member opened last (if they still may see it),
+    else the classes calendar. Not signed in: the login page."""
+    viewer = find_viewer(request, db)
+    if viewer is None:
+        return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(last_class_url(db, viewer) or "/classes", status_code=303)
+
+
+def last_class_url(db: Session, viewer) -> str | None:
+    """The address of the class this member visited most recently, or None."""
+    if not viewer.is_member:
+        return None
+    visits = db.exec(select(ClassVisit).where(ClassVisit.user_id == viewer.id)
+                     .order_by(ClassVisit.seen_at.desc()).limit(5)).all()
+    for visit in visits:
+        course = db.get(Course, visit.course_id)
+        if course is not None and can_view_course(db, viewer, course):
+            return f"/classes/{course.id}"
+    return None
 
 
 @router.get("/login")
@@ -110,7 +128,7 @@ def login(
     request: Request,
     login_id: str = Form(""),
     password: str = Form(""),
-    next: str = Form("/classes"),
+    next: str = Form("/"),
     db: Session = Depends(get_session),
 ):
     """Check the Login ID and password, then sign this device in for 7 days."""
@@ -130,7 +148,7 @@ def login(
 
 
 @router.post("/guest")
-def continue_as_guest(request: Request, next: str = Form("/classes"), db: Session = Depends(get_session)):
+def continue_as_guest(request: Request, next: str = Form("/"), db: Session = Depends(get_session)):
     """Look around without an account: read-only, limited, for a day."""
     return signed_in_response(request, db, None, next)
 

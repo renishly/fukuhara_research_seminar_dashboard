@@ -397,12 +397,18 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
 
 
 @router.get("/classes/{course_id}")
-def class_page(request: Request, course_id: int, tab: str = "assignments", skill: int | None = None,
+def class_page(request: Request, course_id: int, tab: str | None = None, skill: int | None = None,
                viewer: Viewer = Depends(current_viewer), db: Session = Depends(get_session)):
     course = get_course(db, viewer, course_id)
     mark_class_seen(db, viewer, course)
-    tab = tab if tab in course_tabs(course) else "assignments"
+    # A class opens on its Agents tab if it has one, else on Assignments.
+    default = "agents" if "agents" in course_tabs(course) else "assignments"
+    tab = tab if tab in course_tabs(course) else default
+    mine = list(db.exec(select(Agent).where(Agent.course_id == course.id, Agent.owner_id == viewer.id)
+                        .order_by(func.lower(Agent.name))).all()) if viewer.is_member and viewer.id else []
+    my_states = states_for(db, mine)
     return render(request, db, viewer, "class.html", summary=enrolment_summary(db, course),
+                  my_agents=[(agent, my_states[agent.id]) for agent in mine],
                   ended=month_number(course.end_month) < month_number(today_jst()),
                   **tab_context(db, viewer, course, tab, open_skill=skill))
 

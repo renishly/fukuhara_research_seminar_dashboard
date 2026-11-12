@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
 {% import "partials/agent_state.html" as states %}
 {% block title %}{{ state_words }} on {{ bar.label }} · {{ course.title }}{% endblock %}
 {% block content %}
@@ -6,7 +7,8 @@
    whoever owns them: e.g. everyone's agents that were offline on 11/10. #}
 <main class="mx-auto max-w-6xl space-y-6 px-4 py-8">
   <header class="space-y-1">
-    <a href="/classes/{{ course.id }}?tab=agents" class="btn btn-ghost btn-sm -ml-3">&larr; {{ course.title }}</a>
+    {{ nav.crumbs([("Classes", "/classes"), (mask(course_name(course)), "/classes/%d?tab=agents" % course.id),
+                   (state_words ~ " on " ~ bar.label, None)]) }}
     <p class="text-sm text-base-content/70">Agents due on {{ bar.day }} ({{ bar.weekday }}), by their worst state that day</p>
     <h1 class="page-title flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
       <span class="lf-key lf-{{ state_key }} lf-key-big" aria-hidden="true"></span>{{ state_words }}

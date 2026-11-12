@@ -1,0 +1,12 @@
+{# Where you are, with every level above a link: Classes › Fall 2026 › Rin Ito › Mizuho-Debate.
+   Use: {% import "partials/breadcrumbs.html" as nav %} {{ nav.crumbs([("Classes", "/classes"), ...]) }}
+   The last item is the current page (not a link). #}
+{% macro crumbs(items) -%}
+<nav class="breadcrumbs -ml-1 max-w-full py-0 text-sm" aria-label="Breadcrumb">
+  <ul>
+    {% for label, url in items %}
+    <li class="min-w-0">{% if url and not loop.last %}<a href="{{ url }}" class="link truncate">{{ label }}</a>{% else %}<span class="truncate font-semibold" aria-current="page">{{ label }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</nav>
+{%- endmacro %}

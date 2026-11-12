@@ -5,7 +5,12 @@ allowed, records it in the StoredFile table, and sends files back to
 browsers with safe headers.
 """
 
+import csv
+import html
+import io
+import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -38,12 +43,22 @@ TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".log", 
 HTML_EXTENSIONS = {".html", ".htm"}
 PREVIEW_LIMIT = 20 * MB  # bigger files are only offered as downloads
 
-# The rules for showing an HTML or text file from a member: "sandbox" makes the
-# browser treat it as coming from a separate, unknown site (so it can't see
-# anyone's sign-in or use this site), and scripts, forms and pop-ups are off.
-# Only styles, pictures and fonts written inside the file itself are allowed.
+# The rules for showing a text file from a member: "sandbox" makes the browser
+# treat it as coming from a separate, unknown site (so it can't see anyone's
+# sign-in or use this site), and scripts, forms and pop-ups are off. Only
+# styles, pictures and fonts written inside the file itself are allowed.
 SANDBOX_POLICY = ("sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; "
                   "frame-ancestors 'self'")
+# HTML pages (e.g. an agent's monitor.html with charts) may also run the
+# scripts written inside them ("allow-scripts"), still as that separate,
+# unknown site: they can't see anyone's sign-in or this site's pages, and
+# "default-src 'none'" means they can't load or send anything over the
+# internet either. Only pages whose scripts are inside the file itself work.
+HTML_POLICY = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
+               "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; "
+               "frame-ancestors 'self'")
+CSV_EXTENSIONS = {".csv", ".tsv"}
+CSV_ROWS = 2000  # a preview shows at most this many rows
 
 
 def preview_kind(stored: StoredFile | None) -> str | None:
@@ -56,9 +71,71 @@ def preview_kind(stored: StoredFile | None) -> str | None:
         return "pdf"
     if stored.content_type == "text/html" or extension in HTML_EXTENSIONS:
         return "html"
+    if extension in CSV_EXTENSIONS or stored.content_type in ("text/csv", "text/tab-separated-values"):
+        return "csv"
+    if extension == ".json" or stored.content_type == "application/json":
+        return "json"
     if stored.content_type.startswith("text/") or extension in TEXT_EXTENSIONS:
         return "text"
     return None
+
+
+# Google Drive / Docs links that can be shown with Google's own preview.
+DRIVE_PATTERNS = [
+    (re.compile(r"^https://drive\.google\.com/file/d/([\w-]+)"), "https://drive.google.com/file/d/{}/preview"),
+    (re.compile(r"^https://drive\.google\.com/open\?id=([\w-]+)"), "https://drive.google.com/file/d/{}/preview"),
+    (re.compile(r"^https://docs\.google\.com/(document|spreadsheets|presentation)/d/([\w-]+)"), None),
+]
+
+
+def drive_preview_url(url: str | None) -> str | None:
+    """Google's embeddable preview of a Drive or Docs link, or None for any other link.
+    (It shows only what the viewer's own Google account may open.)"""
+    for pattern, template in DRIVE_PATTERNS:
+        match = pattern.match((url or "").strip())
+        if match:
+            if template is None:
+                return f"https://docs.google.com/{match.group(1)}/d/{match.group(2)}/preview"
+            return template.format(match.group(1))
+    return None
+
+
+templates.env.globals["drive_preview_url"] = drive_preview_url
+
+
+def csv_table_page(raw: bytes, filename: str) -> str:
+    """A CSV or TSV file as an HTML table (every cell escaped), sortable by
+    clicking a column's heading. At most CSV_ROWS rows."""
+    text = raw.decode("utf-8-sig", errors="replace")
+    delimiter = "\t" if filename.lower().endswith(".tsv") else ","
+    try:
+        delimiter = csv.Sniffer().sniff(text[:4096], delimiters=",\t;").delimiter
+    except csv.Error:
+        pass
+    rows = []
+    for number, row in enumerate(csv.reader(io.StringIO(text), delimiter=delimiter)):
+        if number > CSV_ROWS:
+            break
+        rows.append(row)
+    head, body = (rows[0], rows[1:]) if rows else ([], [])
+    cut = len(body) >= CSV_ROWS
+    cell = lambda value: html.escape(value)
+    return ("<!doctype html><meta charset='utf-8'><style>"
+            "body{font:13px/1.4 system-ui,sans-serif;margin:0;color:#0b1f3a}"
+            "table{border-collapse:collapse;width:max-content;min-width:100%}"
+            "th,td{border:1px solid #c9d5e6;padding:4px 8px;text-align:left;white-space:nowrap}"
+            "th{position:sticky;top:0;background:#d7e5f8;cursor:pointer;user-select:none}"
+            "th:after{content:' \\2195';opacity:.4}tr:nth-child(even) td{background:#f4f8fd}"
+            "p{margin:6px 8px;color:#55657c}</style>"
+            "<table><thead><tr>" + "".join(f"<th>{cell(h)}</th>" for h in head) + "</tr></thead><tbody>"
+            + "".join("<tr>" + "".join(f"<td>{cell(v)}</td>" for v in row) + "</tr>" for row in body)
+            + "</tbody></table>"
+            + (f"<p>Showing the first {CSV_ROWS:,} rows; download the file for the rest.</p>" if cut else "")
+            + "<script>document.querySelectorAll('th').forEach(function(th,i){var up=true;th.onclick=function(){"
+              "var tb=document.querySelector('tbody'),rows=[].slice.call(tb.rows);rows.sort(function(a,b){"
+              "var x=a.cells[i]?a.cells[i].textContent:'',y=b.cells[i]?b.cells[i].textContent:'',"
+              "p=parseFloat(x),q=parseFloat(y);var r=(!isNaN(p)&&!isNaN(q))?p-q:x.localeCompare(y);"
+              "return up?r:-r});up=!up;rows.forEach(function(r){tb.appendChild(r)})}})</script>")
 
 
 templates.env.globals["preview_kind"] = preview_kind
@@ -237,6 +314,18 @@ def preview_response(stored: StoredFile) -> StreamingResponse:
                "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"}
     if kind == "pdf":
         return StreamingResponse(stream(), media_type="application/pdf", headers=headers)
-    headers["Content-Security-Policy"] = SANDBOX_POLICY
+    if kind == "csv":  # a sortable table (cells escaped; the only script is ours)
+        headers["Content-Security-Policy"] = HTML_POLICY
+        page = csv_table_page(b"".join(stream()), stored.filename)
+        return StreamingResponse(iter([page.encode("utf-8")]), media_type="text/html; charset=utf-8", headers=headers)
+    if kind == "json":  # laid out with indents, if it really is JSON; as it is otherwise
+        headers["Content-Security-Policy"] = SANDBOX_POLICY
+        raw = b"".join(stream())
+        try:
+            raw = json.dumps(json.loads(raw.decode("utf-8-sig")), indent=2, ensure_ascii=False).encode("utf-8")
+        except ValueError:
+            pass
+        return StreamingResponse(iter([raw]), media_type="text/plain; charset=utf-8", headers=headers)
+    headers["Content-Security-Policy"] = HTML_POLICY if kind == "html" else SANDBOX_POLICY
     media_type = "text/html; charset=utf-8" if kind == "html" else "text/plain; charset=utf-8"
     return StreamingResponse(stream(), media_type=media_type, headers=headers)

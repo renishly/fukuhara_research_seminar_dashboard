@@ -940,6 +940,19 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   .marquee.is-overflowing > span, .card-warn { animation: none; }
 }
 
+/* "My agents" on the class page: one small card per agent of the viewer's. */
+.my-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 16rem;
+  padding: 0.2rem 0.6rem 0.2rem 0.3rem;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 0.8125rem;
+}
+
 /* The live feed (partials/live_feed.html, live_feed_body.html). Colours
    follow the state pills. */
 
