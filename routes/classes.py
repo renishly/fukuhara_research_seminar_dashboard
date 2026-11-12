@@ -399,6 +399,9 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
         raise not_found()
     context = {"course": course, "tab": tab, "tabs": course_tabs(course), "can_manage": can_manage_classes(viewer),
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
+    # The Agent skills tab's blue "!" while this member has new / updated skills to check.
+    context["skills_unseen"] = len(market.unseen(db, viewer, market.market_skills(db, course))) \
+        if viewer.is_member and course.has_agents else 0
     # A student in this class gets "My dashboard" above the Agents tab.
     context["my_dashboard"] = context["can_submit"] and "agents" in context["tabs"]
     if tab == "forecasts":  # Jimin's overview: every agent's forecast, this week vs last (members only)

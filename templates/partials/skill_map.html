@@ -1,0 +1,164 @@
+{# Hoang Long's class skill map (skillmap.py, routes/skills.py skill_map).
+   General to detail: tiles; the students x categories matrix (filtered),
+   each cell the student's built + live skills, a bar for live / built /
+   planned, a dashed amber cell for a gap; a category across the class; two
+   students compared. Everything reloads into #skill-map. #}
+{% set m = map %}
+{% set base = "/classes/%d/skill-map" % course.id %}
+<div class="space-y-5">
+  <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ m.rows | length }}</span><span class="text-xs">students</span></div></div>
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ m.built_or_live }}</span><span class="text-xs">skills built or live</span></div></div>
+    <div class="card"><div class="card-body p-3"><span class="text-2xl font-bold">{{ m.live_share ~ "%" if m.live_share is not none else "—" }}</span><span class="text-xs">of them live (reaching the dashboard)</span></div></div>
+    <div class="card"><div class="card-body p-3"><span class="truncate text-lg font-bold" title="{{ m.biggest_gap.name if m.biggest_gap }}">{{ m.biggest_gap.name if m.biggest_gap else "None" }}</span>
+      <span class="text-xs">biggest class gap{% if m.biggest_gap %} ({{ m.biggest_gap_count }} with nothing){% endif %}</span></div></div>
+  </div>
+
+  {% if chosen %}
+  {# One category across the class: who has what, so pairs can share. #}
+  {% set number, category = chosen %}
+  <section class="card"><div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h3 class="card-title">{{ number }} &middot; {{ category.name }}</h3>
+      <button type="button" class="link text-sm" hx-get="{{ base }}?layout={{ layout }}&show={{ show }}" hx-target="#skill-map">&larr; Back to the map</button>
+    </div>
+    <p class="text-sm text-base-content/70">{{ category.description }}</p>
+    <ul class="space-y-2">
+      {% for row in m.rows %}{% set cell = row.cells[number] %}
+      <li class="flex flex-wrap items-center gap-2 text-sm">
+        <strong class="w-40 truncate">{{ who(row.student) }}</strong>
+        {% for skill in cell.skills %}
+        <button type="button" class="badge sm-chip sm-{{ 'planned' if skill in cell.planned else ('live' if skill in cell.live else 'built') }}"
+                hx-get="/skills/{{ skill.id }}" hx-target="#modal">{{ skill.name }}</button>
+        {% else %}<span class="text-xs text-error">&#10005; nothing in this category</span>{% endfor %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div></section>
+
+  {% elif compared %}
+  {# Two students side by side: mirrored bars per category, and what it means. #}
+  <section class="card"><div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h3 class="card-title">{{ who(compared.a.student) }} &harr; {{ who(compared.b.student) }}</h3>
+      <button type="button" class="link text-sm" hx-get="{{ base }}?layout={{ layout }}&show={{ show }}" hx-target="#skill-map">&larr; Back to the map</button>
+    </div>
+    <table class="table table-sm">
+      <thead><tr><th class="text-right">{{ who(compared.a.student) }}</th><th class="text-center">Category</th><th>{{ who(compared.b.student) }}</th><th>Reading</th></tr></thead>
+      <tbody>
+        {% set top = [m.max_count, 1] | max %}
+        {% for line in compared.lines %}
+        <tr class="{{ 'sm-both-gap' if line.both_gap }}">
+          <td><div class="flex items-center justify-end gap-2"><span class="font-mono">{{ line.a }}</span><span class="sm-bar" style="width: {{ (line.a / top * 8) | round(2) }}rem"></span></div></td>
+          <td class="text-center text-xs">{{ line.number }} &middot; {{ line.category.name }}</td>
+          <td><div class="flex items-center gap-2"><span class="sm-bar" style="width: {{ (line.b / top * 8) | round(2) }}rem"></span><span class="font-mono">{{ line.b }}</span></div></td>
+          <td class="text-xs">{{ line.verdict }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div></section>
+
+  {% else %}
+  {% set g = graph %}
+  {# The graph: the 10 category nodes on one path (left to right), each
+     holding its skill nodes on inner connections (one per agent: skills used
+     together, in the order they read each other); miscellaneous skills
+     outside, near the skills they work with. Node colour = live / built /
+     planned; node size = votes; blue "!" = not checked yet. #}
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-hidden="true">
+      <li class="flex items-center gap-1.5"><span class="sm-key sm-live rounded-full"></span>Live</li>
+      <li class="flex items-center gap-1.5"><span class="sm-key sm-built rounded-full"></span>Built</li>
+      <li class="flex items-center gap-1.5"><span class="sm-key sm-planned rounded-full"></span>Planned</li>
+      <li>Bigger = more upvotes</li>
+      <li class="flex items-center gap-1.5"><span class="skill-new" style="position: static">!</span>Not checked yet</li>
+    </ul>
+    <div class="flex flex-wrap items-end gap-2">
+      <label class="flex flex-col gap-1 text-xs">Highlight
+        <select class="select select-xs w-40" data-sg-owner aria-label="Highlight a member's skills">
+          <option value="">Everyone</option>
+          {% for owner_id, owner_name in g.owners %}<option value="{{ owner_id }}">{{ "You" if owner_id == viewer.id else owner_name }}</option>{% endfor %}
+        </select>
+      </label>
+      <form class="flex items-end gap-1" hx-get="{{ base }}" hx-target="#skill-map">
+        <input type="hidden" name="layout" value="{{ layout }}">
+        {% for key in ("a", "b") %}
+        <select name="{{ key }}" class="select select-xs w-32" aria-label="Student {{ key | upper }}">
+          {% for row in m.rows %}<option value="{{ row.student.id }}" {{ "selected" if (key == "a" and loop.first) or (key == "b" and loop.index == 2) }}>{{ who(row.student) }}</option>{% endfor %}
+        </select>
+        {% endfor %}
+        <button type="submit" class="btn btn-xs">Compare</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="sg-frame relative" data-sg-root>
+    <div class="sg-toolbar">
+      <button type="button" class="btn btn-sm" data-sg-mode aria-pressed="false">&#9998; Draw a path</button>
+      <span class="text-xs text-base-content/70" data-sg-hint>Click a skill to open it, or a category to see it across the class.</span>
+    </div>
+    <div class="overflow-x-auto">
+      <svg class="sg" data-skill-graph data-sg-next='{{ g.next | tojson }}' viewBox="0 0 {{ g.width }} {{ g.height }}" width="{{ g.width }}" height="{{ g.height }}"
+           role="img" aria-label="Skill map: the class's 10 categories as connected nodes, with each member's skills inside">
+        <defs>
+          <pattern id="sg-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="5" height="5" fill="#ffffff"/><line x1="0" y1="0" x2="0" y2="5" stroke="#0b1f3a" stroke-width="2" stroke-opacity="0.45"/></pattern>
+        </defs>
+        {% for e in g.main %}<line class="sg-main" data-sg-from="{{ e.from }}" data-sg-to="{{ e.to }}" x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}"/>{% endfor %}
+        {% for c in g.categories %}
+        {# Everything that moves with a category node when it's dragged. #}
+        <g class="sg-catwrap" data-sg-cat="{{ c.number }}" data-cx="{{ '%.1f' % c.cx }}" data-cy="{{ '%.1f' % c.cy }}" data-r="{{ '%.1f' % c.r }}">
+        <g class="sg-cat {{ 'sg-cat-empty' if not c.count }}" hx-get="{{ base }}?layout={{ layout }}&category={{ c.number }}" hx-target="#skill-map" data-sg-category tabindex="0">
+          <title>{{ c.number }} · {{ c.row.name }}: {{ c.count }} skill{{ "s" if c.count != 1 }}. {{ c.row.description }}</title>
+          <circle cx="{{ '%.1f' % c.cx }}" cy="{{ '%.1f' % c.cy }}" r="{{ '%.1f' % c.r }}"/>
+          <text class="sg-cat-label" x="{{ '%.1f' % c.cx }}" y="{{ '%.1f' % (c.cy + c.r + 16) }}">{{ c.number }} · {{ c.row.name }}</text>
+          <text class="sg-cat-count" x="{{ '%.1f' % c.cx }}" y="{{ '%.1f' % (c.cy + c.r + 30) }}">{{ c.count }} skill{{ "s" if c.count != 1 }}</text>
+        </g>
+        <line class="sg-bypass" x1="{{ '%.1f' % c.left[0] }}" y1="{{ c.cy }}" x2="{{ '%.1f' % c.right[0] }}" y2="{{ c.cy }}"/>
+        <circle class="sg-port" cx="{{ '%.1f' % c.left[0] }}" cy="{{ c.cy }}" r="4"/><circle class="sg-port" cx="{{ '%.1f' % c.right[0] }}" cy="{{ c.cy }}" r="4"/>
+        </g>
+        {% endfor %}
+        {% for p in g.paths %}<path class="sg-inner" data-sg-lane="{{ p.category }}" data-sg-ids="{{ p.ids | join(',') }}" d="{{ smooth(p.points) }}"/>{% endfor %}
+        {% for e in g.misc_edges %}<line class="sg-misc-edge" data-sg-a="{{ e.a }}" data-sg-b="{{ e.b }}" x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}"/>{% endfor %}
+        <path class="sg-route" data-sg-route d=""/>
+        {% for n in (g.categories | map(attribute="skills") | sum(start=[])) + g.misc %}
+        <g class="sg-skill" data-sg-skill="{{ n.id }}" data-x="{{ n.x }}" data-y="{{ n.y }}" data-owner="{{ n.owner_id }}"
+           data-name="{{ n.name }}" data-category="{{ n.category if n.category is not none else 'misc' }}" data-r="{{ n.r }}" tabindex="0" role="button"
+           data-owner-name="{{ 'you' if n.owner_id == viewer.id else n.owner }}" data-agent="{{ n.agent }}" data-status="{{ n.status }}"
+           data-score="{{ n.score }}" data-new="{{ unseen.get(n.id, '') }}"
+           aria-label="{{ n.name }} by {{ n.owner }}">
+          <circle class="sg-{{ n.status }}" cx="{{ n.x }}" cy="{{ n.y }}" r="{{ n.r }}"/>
+          <text x="{{ n.x }}" y="{{ n.y }}">{{ n.initials }}</text>
+          {% if unseen.get(n.id) %}<g class="sg-new"><circle cx="{{ n.x + n.r * 0.75 }}" cy="{{ n.y - n.r * 0.75 }}" r="6"/><text x="{{ n.x + n.r * 0.75 }}" y="{{ n.y - n.r * 0.75 }}">!</text></g>{% endif %}
+        </g>
+        {% endfor %}
+        <g data-sg-order></g>
+      </svg>
+    </div>
+    {% if g.unplaced %}
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      <span class="font-semibold">Not in a category yet:</span>
+      {% for n in g.unplaced %}<button type="button" class="badge sm-chip sm-{{ n.status }}" hx-get="/skills/{{ n.id }}" hx-target="#modal" title="by {{ n.owner }}">{{ n.name }}</button>{% endfor %}
+    </div>
+    {% endif %}
+
+    {# The hover label for skill nodes (ui.js): name, creator, status, votes. #}
+    <div class="sg-tip" data-sg-tip hidden role="tooltip"></div>
+    {# Drawing a path: the picked skills, in order, and the zip of them by category. #}
+    <form class="sg-path" data-sg-panel hidden method="post" action="/classes/{{ course.id }}/skills/bundle">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm"><strong>Your path:</strong> <span data-sg-count>0</span> skills. Start anywhere, then follow the lines left to right: the skills you can go to next are highlighted. Click the last one again to take it back.</p>
+        <div class="flex gap-1.5">
+          <button type="button" class="btn btn-xs" data-sg-undo>Undo</button>
+          <button type="button" class="btn btn-xs" data-sg-clear>Clear</button>
+          <button type="submit" class="btn btn-primary btn-xs" data-sg-download disabled>Download zip</button>
+        </div>
+      </div>
+      <ol class="sg-path-list" data-sg-list></ol>
+      <div data-sg-inputs></div>
+    </form>
+  </div>
+  {% endif %}
+</div>

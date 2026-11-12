@@ -37,6 +37,27 @@
     </label>
     {% endfor %}
   </fieldset>
+  <div class="grid gap-3 sm:grid-cols-2">
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Category</legend>
+      <select name="category" class="select select-sm w-full">
+        <option value="">Let the organizer decide</option>
+        {% for number, label, question in fixed_categories %}
+        <option value="{{ number }}" {{ 'selected' if v.category == number|string }}>{{ number }} &middot; {{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="label whitespace-normal">The class's categories. A category you choose is never changed by the organizer.</p>
+    </fieldset>
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Who could use it</legend>
+      {% for value, label in scopes.items() %}
+      <label class="flex cursor-pointer items-center gap-2 text-sm">
+        <input type="radio" name="scope" value="{{ value }}" class="radio radio-sm" {{ 'checked' if v.scope == value }}> {{ label }}
+      </label>
+      {% endfor %}
+      <p class="label whitespace-normal">Common candidate: it would work on another member's data with only settings changed.</p>
+    </fieldset>
+  </div>
   <div class="modal-action">
     <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
     <button type="submit" class="btn btn-primary">{{ "Save" if skill else "Share" }}</button>

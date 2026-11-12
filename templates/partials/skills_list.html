@@ -3,7 +3,10 @@
    do; choosing one category shows its description on top. #}
 {% macro card(skill) %}
   {% set category = categories.get(skill.category_id) %}
-  <button type="button" class="card cursor-pointer text-left" hx-get="/skills/{{ skill.id }}" hx-target="#modal">
+  <button type="button" class="card relative cursor-pointer text-left" hx-get="/skills/{{ skill.id }}" hx-target="#modal"
+          onclick="this.querySelector('.skill-new')?.remove()">
+    {% if unseen.get(skill.id) %}<span class="skill-new" role="img" aria-label="{{ unseen[skill.id] | capitalize }}: not checked yet"
+      title="{{ unseen[skill.id] | capitalize }}: you haven't checked it yet">!</span>{% endif %}
     <span class="card-body gap-2 p-4">
       <span class="flex items-start gap-2">
         <strong class="min-w-0 flex-1 break-words">{{ skill.name }}</strong>
@@ -15,6 +18,9 @@
       <span class="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
         <code class="text-[0.7rem]">{{ identifier(skill) }}</code>
         {% if category and not chosen and not groups %}<span class="badge badge-ghost badge-xs">{{ category.name }}</span>{% endif %}
+        {% if not skill.builtin %}{% set score = votes.get(skill.id, 0) %}<span data-vote-for="{{ skill.id }}" class="font-mono font-semibold {{ 'text-success' if score > 0 else ('text-error' if score < 0) }}" title="Votes: ups minus downs">{{ "▲%+d" % score if score > 0 else ("▼%d" % score if score < 0 else "±0") }}</span>{% endif %}
+        {% if skill.scope == "common" and not skill.builtin %}<span class="badge badge-success badge-soft badge-xs" title="Common candidate: others could reuse it">common</span>{% endif %}
+        {% if skill.planned %}<span class="badge badge-ghost badge-xs" title="Not built yet">planned</span>{% endif %}
         {% if skill.agent_id in trees %}<span title="Its agent has a skill tree">&#127795;</span>{% endif %}
       </span>
     </span>

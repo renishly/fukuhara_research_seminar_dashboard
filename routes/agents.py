@@ -241,6 +241,9 @@ def site_url(request: Request) -> str:
 CONNECTOR_FILES = {
     "code": (BASE_DIR / "connector" / "dashboard_connector.py", "dashboard_connector.py", "text/x-python"),
     "prompt": (BASE_DIR / "connector" / "connector_prompt.md", "dashboard_connector_prompt.md", "text/markdown"),
+    # Raiyaan's skill-sorter rulebook and SKILL.md template, for the skills zip.
+    "rulebook": (BASE_DIR / "connector" / "skill_sorter_rulebook.md", "skill_sorter_rulebook.md", "text/markdown"),
+    "skill-template": (BASE_DIR / "connector" / "skill_frontmatter_template.md", "SKILL_template.md", "text/markdown"),
 }
 
 

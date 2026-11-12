@@ -5,6 +5,11 @@ from sqlmodel import Session, delete, select, update
 
 import market
 from db import (
+    Alumnus,
+    AlumnusContact,
+    ChatMessage,
+    SkillSeen,
+    SkillVote,
     DATABASE_LIMIT,
     Agent,
     ClassVisit,
@@ -164,7 +169,14 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
     name = user.full_name
     for submission in db.exec(select(Submission).where(Submission.student_id == user.id)).all():
         delete_submission(db, submission)
+    market.forget_votes(db, db.exec(select(Skill.id).where(Skill.owner_id == user.id)).all())
     db.exec(delete(Skill).where(Skill.owner_id == user.id))
+    # Their votes, chat, and OB/OG records (the alumni they added stay, without the name).
+    db.exec(delete(SkillVote).where(SkillVote.user_id == user.id))
+    db.exec(delete(SkillSeen).where(SkillSeen.user_id == user.id))
+    db.exec(delete(ChatMessage).where(ChatMessage.user_id == user.id))
+    db.exec(update(AlumnusContact).where(AlumnusContact.member_id == user.id).values(member_id=None))
+    db.exec(update(Alumnus).where(Alumnus.added_by == user.id).values(added_by=None))
     for agent in db.exec(select(Agent).where(Agent.owner_id == user.id)).all():
         delete_agent(db, agent)
     for tree in db.exec(select(SkillTree).where(SkillTree.owner_id == user.id)).all():

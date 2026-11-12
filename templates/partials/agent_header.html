@@ -103,6 +103,19 @@
       </section>
 
       <section class="space-y-2">
+        <h4 class="font-semibold">Skills (.zip)</h4>
+        <form class="flex flex-wrap items-center gap-2" hx-post="/agents/{{ agent.id }}/skills/zip" hx-target="#modal"
+              hx-encoding="multipart/form-data">
+          <input type="file" name="file" accept=".zip" required class="file-input file-input-sm" aria-label="Skills zip">
+          <button type="submit" class="btn btn-sm">Check skills</button>
+        </form>
+        <p class="text-xs text-base-content/70">Upload this agent's skills folder as one zip:
+          <code>skills/&lt;skill-name&gt;/SKILL.md</code>, each starting with <code>name:</code> and <code>description:</code>
+          frontmatter. You'll check the suggested categories before anything is published.
+          <a href="/connector/rulebook" class="link">Rules</a> &middot; <a href="/connector/skill-template" class="link">SKILL.md template</a></p>
+      </section>
+
+      <section class="space-y-2">
         <h4 class="font-semibold">Folders</h4>
         <div class="flex flex-wrap items-center gap-2">
           {% for folder in tagged %}

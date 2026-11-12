@@ -7,6 +7,7 @@
     <h2 class="section-title font-semibold">Agent skills</h2>
     <div class="flex flex-wrap gap-2">
       <button type="button" class="btn btn-sm" hx-get="/classes/{{ course.id }}/skill-trees/new" hx-target="#modal">+ Skill tree</button>
+      {% if skills_unseen %}<button type="button" class="btn btn-ghost btn-sm" hx-post="/classes/{{ course.id }}/skills/seen">Mark all as checked ({{ skills_unseen }})</button>{% endif %}
       <button type="button" class="btn btn-primary btn-sm" hx-get="/classes/{{ course.id }}/skills/new" hx-target="#modal">+ Share a skill</button>
     </div>
   </div>
@@ -27,7 +28,7 @@
       <select name="category" class="select select-sm" id="skills-category">
         <option value="">All</option>
         {% for c in skill_categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-        <option value="none">Not organized yet</option>
+        <option value="none">Not sorted yet</option>
       </select>
     </label>
     <label class="flex flex-col gap-1 text-xs">Shared by
@@ -35,6 +36,13 @@
         <option value="">Members and agents</option>
         <option value="member">Members</option>
         <option value="agent">Agents</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-1 text-xs">Reuse
+      <select name="reuse" class="select select-sm">
+        <option value="">Common and personal</option>
+        <option value="common">Common candidates</option>
+        <option value="personal">Personal</option>
       </select>
     </label>
     <label class="flex flex-col gap-1 text-xs">Sort

@@ -122,6 +122,7 @@ def delete_skill(ref: str, agent: Agent = Depends(require_agent), db: Session = 
     skill = find_skill(db, agent, ref)
     if skill.agent_id != agent.id:
         raise HTTPException(403, "Agents can only delete skills they posted themselves")
+    market.forget_votes(db, [skill.id])
     db.delete(skill)
     db.commit()
     return {"deleted": 1}

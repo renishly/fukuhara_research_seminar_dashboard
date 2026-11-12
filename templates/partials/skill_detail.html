@@ -6,7 +6,10 @@
 {% block body %}
 <div class="space-y-4" x-data="{ deleting: false, showTree: false }">
   <div class="space-y-1">
-    <h3 class="text-lg font-bold normal-case tracking-normal">{{ skill.name }}</h3>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-lg font-bold normal-case tracking-normal">{{ skill.name }}</h3>
+      {% if not skill.builtin %}{% include "partials/skill_vote.html" %}{% endif %}
+    </div>
     {% if skill.builtin %}
     <p class="text-sm"><span class="badge badge-secondary badge-sm">built in</span> Comes with the dashboard and is on every
       class's market. It's rewritten whenever the dashboard is updated, so it always matches the dashboard as it is now.</p>

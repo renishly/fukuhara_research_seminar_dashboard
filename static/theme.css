@@ -933,6 +933,93 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   font-size: 0.75rem;
 }
 
+/* Hoang Long's class skill map (partials/skill_map.html). Cells get darker
+   navy with more skills; a gap is a dashed amber box. */
+.sm-table { border-collapse: separate; border-spacing: 3px; font-size: 0.8125rem; }
+.sm-table th { text-align: left; font-weight: 600; white-space: nowrap; padding: 0.2rem 0.4rem; }
+.sm-table tbody th { position: sticky; left: 0; background: var(--paper); max-width: 11rem; overflow: hidden; text-overflow: ellipsis; }
+.sm-head { text-align: left; cursor: pointer; }
+.sm-head:hover { text-decoration: underline; }
+.sm-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15rem;
+  width: 3.25rem; height: 2.6rem; border-radius: 4px; cursor: pointer;
+  background: rgb(11 31 58 / var(--shade, 0.08)); border: 1px solid rgb(11 31 58 / 0.2);
+}
+.sm-cell:hover { outline: 2px solid var(--ink); }
+.sm-cell.sm-gap { background: #fff4d6; border: 1.5px dashed var(--amber); color: #9a6700; }
+.sm-split { display: flex; gap: 1px; width: 80%; height: 4px; border-radius: 2px; overflow: hidden; background: #ffffff; }
+.sm-split > span { flex-basis: 0; }
+.sm-live, .sm-key.sm-live { background: var(--green); }
+.sm-built, .sm-key.sm-built { background: var(--cobalt); }
+.sm-planned, .sm-key.sm-planned { background: repeating-linear-gradient(135deg, rgb(11 31 58 / 0.5) 0 2px, transparent 2px 4px); }
+.sm-key { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; }
+.sm-key.sm-gap { background: #fff4d6; border: 1.5px dashed var(--amber); }
+.sm-chip { cursor: pointer; color: #ffffff; border: none; }
+.sm-chip.sm-planned { color: var(--ink); border: 1px dashed var(--ink); background: #ffffff; }
+.sm-bar { display: inline-block; height: 0.7rem; min-width: 2px; background: var(--cobalt); border-radius: 2px; }
+.sm-both-gap > * { background: #fff4d6; }
+
+/* The skill map graph (partials/skill_map.html). */
+.sg-frame { display: flex; flex-direction: column; gap: 0.6rem; }
+.sg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.sg { display: block; max-width: none; touch-action: pan-x pan-y; }
+.sg.sg-drawing { touch-action: none; cursor: crosshair; }
+.sg-main { stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+.sg-cat circle { fill: rgb(47 91 255 / 0.07); stroke: var(--ink); stroke-width: 2; cursor: grab; }
+.sg-cat:hover circle, .sg-cat:focus-visible circle { fill: rgb(47 91 255 / 0.14); }
+.sg-cat-empty circle { stroke-dasharray: 6 5; fill: #fff8e6; stroke: #b07d00; }
+.sg-drawing .sg-cat circle { cursor: crosshair; }
+.sg-cat-label { font-size: 12px; font-weight: 700; text-anchor: middle; fill: var(--ink); }
+.sg-cat-count { font-size: 11px; text-anchor: middle; fill: rgb(11 31 58 / 0.65); }
+.sg-bypass { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 5; opacity: 0.35; }
+.sg-port { fill: var(--ink); }
+.sg-inner { fill: none; stroke: var(--cobalt); stroke-width: 2; opacity: 0.7; }
+.sg-misc-edge { stroke: rgb(11 31 58 / 0.4); stroke-width: 1.5; stroke-dasharray: 2 4; }
+.sg-skill { cursor: grab; outline: none; }
+.sg.sg-dragging, .sg.sg-dragging .sg-skill, .sg.sg-dragging .sg-cat circle { cursor: grabbing; }
+.sg-drawing .sg-skill { cursor: crosshair; }
+.sg-skill circle.sg-live { fill: var(--green); stroke: #ffffff; stroke-width: 2; }
+.sg-skill circle.sg-built { fill: var(--cobalt); stroke: #ffffff; stroke-width: 2; }
+.sg-skill circle.sg-planned { fill: url(#sg-hatch); stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.sg-skill > text { font-size: 8px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.sg-skill:has(.sg-planned) > text { fill: var(--ink); }
+.sg-skill:hover circle, .sg-skill:focus-visible circle { stroke: var(--ink); stroke-width: 3; }
+.sg-skill.sg-dim { opacity: 0.18; }
+.sg-skill.sg-picked circle:first-of-type { stroke: #f08c00; stroke-width: 4; }
+.sg-new circle { fill: var(--cobalt); stroke: var(--ink); stroke-width: 1.5; }
+.sg-new text { font-size: 9px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.sg-skill.sg-next circle:first-of-type { stroke: #f08c00; stroke-width: 3; stroke-dasharray: 3 2; }
+.sg-skill.sg-blocked { opacity: 0.3; }
+.sg-skill.sg-refused circle:first-of-type { stroke: var(--red); stroke-width: 4; }
+.sg-route { fill: none; stroke: #f08c00; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; opacity: 0.85; pointer-events: none; }
+.sg-order { font-size: 11px; font-weight: 800; fill: #b05d00; text-anchor: middle; pointer-events: none; }
+.sg-tip {
+  position: absolute; z-index: 5; transform: translate(-50%, -100%); pointer-events: none;
+  display: flex; flex-direction: column; gap: 0.1rem; max-width: 16rem; padding: 0.35rem 0.6rem;
+  background: var(--ink); color: #ffffff; border-radius: 6px; font-size: 0.75rem; line-height: 1.3;
+  box-shadow: 0 4px 10px rgb(11 31 58 / 0.25); white-space: nowrap;
+}
+.sg-tip strong { font-size: 0.8125rem; overflow: hidden; text-overflow: ellipsis; }
+.sg-tip .sg-tip-meta { color: rgb(255 255 255 / 0.7); font-size: 0.6875rem; }
+.sg-tip::after {
+  content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%);
+  border: 5px solid transparent; border-bottom: 0; border-top-color: var(--ink);
+}
+.sg-path { padding: 0.75rem; border: 1.5px solid #f08c00; background: #fff8ef; border-radius: 6px; }
+.sg-path-list { list-style: decimal; padding-left: 1.5rem; margin-top: 0.4rem; font-size: 0.8125rem; columns: 2 16rem; }
+
+/* New / updated skills a member hasn't checked yet: the timeline's blue "!". */
+.skill-new, .tab-new {
+  display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem;
+  border-radius: 50%; border: 1.5px solid var(--ink); background: var(--cobalt); color: #ffffff;
+  font-size: 0.75rem; font-weight: 700; line-height: 1;
+}
+.skill-new { position: absolute; top: -0.45rem; right: -0.45rem; z-index: 1; }
+.tab-new { margin-left: 0.35rem; }
+
+/* Raiyaan's "Check your skills" screen: rows the sorter wasn't sure about. */
+.zip-unsure > * { background: #fff4d6; }
+
 /* The top bar: name left, tools in the middle, basics right. */
 .top-bar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem; }
 @media (max-width: 48rem) {

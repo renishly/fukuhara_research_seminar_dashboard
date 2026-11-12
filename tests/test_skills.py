@@ -397,63 +397,61 @@ def test_deleting_an_agent_keeps_its_skills_credited(engine, client, taro, cours
 # --- The organizer ------------------------------------------------------------------------------
 
 
-def test_keyword_rules_sort_skills_by_function(engine, admin, taro, course):
-    share(taro, course, name="Finder", content=RETRIEVAL)
-    share(taro, course, name="Chooser", content=DECISION)
+IR = "# ir-extract\n\nExtract EPS, net debt and share count from the IR page and the yuho filing, with sources."
+DCF = "# dcf-value\n\nValue per share from a DCF: WACC from CAPM, free cash flow, terminal growth."
+POEM = "# haiku\n\nTell a joke to cheer everyone up."
+
+
+def test_skills_are_filed_into_the_class_categories_by_the_rules(engine, admin, taro, course):
+    share(taro, course, name="ir-extract", content=IR)
+    share(taro, course, name="dcf-value", content=DCF)
+    with Session(engine) as db:  # filed straight away, before any organizer run
+        names = {s.name: db.get(SkillCategory, s.category_id).name for s in skills(engine)}
+        assert [c.name for c in market.categories(db)][:3] == ["Shared foundation", "Public data collection",
+                                                               "Alternative & field data"]
+    assert names == {"ir-extract": "Public data collection", "dcf-value": "Valuation"}
+    grouped_view = market_html(taro, course)
+    assert grouped_view.index("Public data collection") < grouped_view.index("Valuation")
+    assert "Multiples, cost of capital, DCF" in grouped_view  # each category's description on top
     reply = admin.post("/market/organize")
     assert "Organized 2 skills" in reply.text
-    with Session(engine) as db:
-        names = {s.name: db.get(SkillCategory, s.category_id).name for s in skills(engine)}
-        assert db.exec(select(OrganizerRun)).one().method == "rules"
-    assert names == {"Finder": "Data retrieval", "Chooser": "Decision frameworks"}
-    grouped_view = market_html(taro, course)
-    assert grouped_view.index("Data retrieval") < grouped_view.index("Decision frameworks")
-    assert "Find and fetch information" in grouped_view  # each category's description on top
-    with Session(engine) as db:
-        decision = db.exec(select(SkillCategory).where(SkillCategory.name == "Decision frameworks")).one().id
-    chosen = market_html(taro, course, category=str(decision))
-    assert "Help an agent choose" in chosen and "Chooser" in chosen and "Finder" not in chosen
     assert taro.post("/market/organize").status_code == 403  # admins only
 
 
-def ai_reply(skill_ids):
-    return ("Here you go:\n```json\n" + json.dumps({
-        "categories": [{"name": "Finding things", "description": "Skills that look things up."},
-                       {"name": "Making choices", "description": "Skills that decide."}],
-        "skills": [{"id": skill_ids[0], "category": "Finding things", "specialty": "Only arXiv, but thorough."},
-                   {"id": skill_ids[1], "category": "Making choices", "specialty": "Scores options with weights."}],
-    }) + "\n```")
+def ai_reply(skill_id):
+    return "Here you go:\n```json\n" + json.dumps(
+        {"skills": [{"id": skill_id, "category": 9, "specialty": "Greets the class every morning."}]}) + "\n```"
 
 
-def test_the_ai_organizer_uses_one_request_and_applies_its_answer(engine, taro, course, monkeypatch):
-    share(taro, course, name="Finder", content=RETRIEVAL)
-    share(taro, course, name="Chooser", content=DECISION)
-    ids = [s.id for s in skills(engine)]
+def test_the_ai_is_asked_only_about_skills_the_rules_were_unsure_of(engine, taro, course, monkeypatch):
+    share(taro, course, name="dcf-value", content=DCF)
+    share(taro, course, name="haiku", content=POEM)
+    poem = next(s for s in skills(engine) if s.name == "haiku")
+    assert poem.category_id is None  # the rules couldn't place it
     sent = []
 
     class Reply:
         ok = True
 
         def json(self):
-            return {"choices": [{"message": {"content": ai_reply(ids)}}]}
+            return {"choices": [{"message": {"content": ai_reply(poem.id)}}]}
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-real")
     monkeypatch.setattr(market.requests, "post", lambda url, **kwargs: sent.append((url, kwargs)) or Reply())
     with Session(engine) as db:
         record = market.run(db, "manual")
     assert record.ok and record.method == "ai" and len(sent) == 1
-    url, kwargs = sent[0]
-    assert url == market.OPENROUTER_URL and kwargs["json"]["model"] == "openrouter/free"
-    assert "BY FUNCTION" in kwargs["json"]["messages"][0]["content"] and "Search arXiv" in kwargs["json"]["messages"][0]["content"]
+    prompt = sent[0][1]["json"]["messages"][0]["content"]
+    assert "cheer everyone up" in prompt and "free cash flow" not in prompt  # only the unsure one
     with Session(engine) as db:
-        finder = db.get(Skill, ids[0])
-        assert db.get(SkillCategory, finder.category_id).name == "Finding things"
-        assert finder.specialty == "Only arXiv, but thorough."
-    assert "Skills that look things up." in market_html(taro, course)
+        poem = db.get(Skill, poem.id)
+        assert db.get(SkillCategory, poem.category_id).name == "Operations & publishing"
+        assert poem.category_source == "ai" and poem.specialty == "Greets the class every morning."
 
 
-def test_a_bad_ai_answer_changes_nothing_and_the_daily_limit_holds(engine, taro, course, monkeypatch):
-    share(taro, course)
+def test_a_bad_ai_answer_keeps_the_rules_filing_and_the_daily_limit_holds(engine, taro, course, monkeypatch):
+    share(taro, course, name="dcf-value", content=DCF)
+    share(taro, course, name="haiku", content=POEM)
     calls = []
 
     class Reply:
@@ -467,7 +465,7 @@ def test_a_bad_ai_answer_changes_nothing_and_the_daily_limit_holds(engine, taro,
     with Session(engine) as db:
         first = market.run(db, "manual")
         assert not first.ok and "no JSON" in first.message
-        assert skills(engine)[0].category_id is None  # nothing changed
+        assert {s.name: s.category_id is not None for s in skills(engine)} == {"dcf-value": True, "haiku": False}
         market.run(db, "manual")
         third = market.run(db, "manual")
     assert len(calls) == 2  # at most two requests a day
@@ -501,3 +499,21 @@ def test_the_daily_timer_needs_its_token(client, monkeypatch):
     assert reply.status_code == 200 and "ran" in reply.json()
     monkeypatch.setenv("ORGANIZER_TOKEN", "")
     assert client.post("/internal/organize-market", headers={"X-Organizer-Token": ""}).status_code == 401
+
+
+def test_owner_picks_a_category_and_common_or_personal(engine, taro, course):
+    share(taro, course, name="dcf-value", content=DCF)
+    skill = skills(engine)[0]
+    taro.post(f"/skills/{skill.id}/edit", data={"summary": "", "share": "class", "mode": "text", "content_text": "",
+                                               "category": "8", "scope": "common"})
+    with Session(engine) as db:
+        skill = db.get(Skill, skill.id)
+        assert db.get(SkillCategory, skill.category_id).name == "Position & portfolio"
+        assert skill.category_source == "owner" and skill.scope == "common"
+        market.organize_with_rules(db)  # the organizer leaves the owner's choice alone
+        assert db.get(SkillCategory, db.get(Skill, skill.id).category_id).name == "Position & portfolio"
+    listing = market_html(taro, course, reuse="common")
+    assert "dcf-value" in listing and ">common<" in listing
+    assert "dcf-value" not in market_html(taro, course, reuse="personal")
+    form = taro.get(f"/skills/{skill.id}/edit").text
+    assert '<option value="8" selected>' in form

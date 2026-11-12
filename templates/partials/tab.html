@@ -14,7 +14,7 @@
         <a role="tab" href="/classes/{{ course.id }}?tab={{ name }}" aria-selected="{{ 'true' if name == tab else 'false' }}"
            class="btn {{ 'btn-primary' if name == tab else '' }}"
            hx-get="/classes/{{ course.id }}/tab/{{ name }}" hx-target="#tab-area" hx-swap="outerHTML"
-           hx-push-url="/classes/{{ course.id }}?tab={{ name }}">{{ {"skills": "Agent skills"}.get(name, name | capitalize) }}</a>
+           hx-push-url="/classes/{{ course.id }}?tab={{ name }}">{{ {"skills": "Agent skills"}.get(name, name | capitalize) }}{% if name == "skills" and skills_unseen %}<span class="tab-new" role="img" aria-label="{{ skills_unseen }} new or updated skills" title="{{ skills_unseen }} new or updated skill{{ 's' if skills_unseen != 1 }} to check">!</span>{% endif %}</a>
       </span>
       {% endfor %}
     </div>
@@ -39,7 +39,18 @@
   {% else %}<p class="text-center text-base-content/70">Sign in as a member to see the documents.</p>{% endif %}
   {% elif tab == "skills" %}
   {# The Agent Skills market, in its own tab (UX/UI team). #}
-  {% if viewer.is_member %}{% include "partials/skills_market.html" %}
+  {% if viewer.is_member %}
+  {# The market, or Hoang Long's class skill map (loaded when first opened). #}
+  <div x-data="{ view: 'map' }" class="space-y-4">
+    <div class="join" role="tablist" aria-label="Agent skills view">
+      <button type="button" role="tab" class="btn btn-sm join-item" :class="{ 'btn-primary': view === 'map' }" @click="view = 'map'">Skill map</button>
+      <button type="button" role="tab" class="btn btn-sm join-item" :class="{ 'btn-primary': view === 'market' }" @click="view = 'market'">Market</button>
+    </div>
+    <div x-show="view === 'map'" id="skill-map" hx-get="/classes/{{ course.id }}/skill-map" hx-trigger="load">
+      <div class="flex justify-center py-6"><span class="loading loading-dots"></span></div>
+    </div>
+    <div x-show="view === 'market'" x-cloak>{% include "partials/skills_market.html" %}</div>
+  </div>
   {% else %}<p class="text-center text-base-content/70">Sign in as a member to see the agent skills.</p>{% endif %}
   {% else %}
   {% if tab != "agents" %}

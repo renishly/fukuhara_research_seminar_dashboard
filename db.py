@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from sqlalchemy import JSON, Column, Text, UniqueConstraint, inspect, text
+from sqlalchemy import JSON, Column, Text, UniqueConstraint, false, inspect, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 # Load secrets from the .env file into environment variables. This lives here
@@ -508,6 +508,15 @@ class Skill(SQLModel, table=True):
     category_id: int | None = Field(default=None, foreign_key="skillcategory.id")
     specialty: str | None = None  # what sets this skill apart from others in its category
     organized_version: int | None = None  # which version the organizer last looked at
+    # How its category was chosen: "owner" (set by hand: never changed by the
+    # organizer), "frontmatter", "rules", "ai" or "dependencies"; and how sure.
+    category_source: str | None = None
+    category_confidence: float | None = None
+    # Masuda: "personal" (specific to its owner's company) or "common" (a
+    # candidate others could reuse).
+    # (Database-side defaults too, so older rows copied into a rebuilt table get them.)
+    scope: str = Field(default="personal", sa_column_kwargs={"server_default": "personal"})
+    planned: bool = Field(default=False, sa_column_kwargs={"server_default": false()})  # Hoang Long: "status: planned"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -531,6 +540,42 @@ class SkillTree(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)  # the AI version's last change
     view_file_id: int | None = Field(default=None, foreign_key="storedfile.id")
     view_updated_at: datetime | None = None
+
+
+class SkillVote(SQLModel, table=True):
+    """A member's up (+1) or down (-1) vote on a skill; one per member per skill."""
+
+    __table_args__ = (UniqueConstraint("skill_id", "user_id"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    skill_id: int = Field(foreign_key="skill.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    value: int  # +1 or -1
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SkillSeen(SQLModel, table=True):
+    """Which version of a skill a member last checked (opened). A newer
+    version, or none, shows the skill to them as new / updated."""
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    skill_id: int = Field(foreign_key="skill.id", primary_key=True)
+    version: int = 1
+
+
+class SkillUpload(SQLModel, table=True):
+    """An agent's skills zip waiting for its owner to check and publish it
+    (Raiyaan's skill sorter): each skill's text and the sorter's suggestions."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", index=True)
+    owner_id: int = Field(foreign_key="user.id")
+    filename: str = ""
+    # [{"name", "description", "content", "category", "confidence", "needs_review", "reason",
+    #   "reusability", "blocked", "warnings", "planned"}]
+    skills: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    warnings: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class OrganizerRun(SQLModel, table=True):
@@ -597,9 +642,10 @@ def create_db_and_tables(target_engine=None) -> None:
         seed_gens(session)
         move_legacy_monitors(session)
         move_legacy_attachments(session)
-        from market import sync_builtin_skills  # here, because market.py imports this file
+        from market import adopt_fixed_categories, sync_builtin_skills  # here: market.py imports this file
 
         sync_builtin_skills(session)
+        adopt_fixed_categories(session)
 
 
 def seed_gens(session: Session) -> None:

@@ -31,10 +31,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from fastapi import UploadFile
-from sqlmodel import Session, func, or_, select
 
-from db import Agent, Course, OrganizerRun, Skill, SkillCategory, SkillTree, StoredFile, User, as_utc, utc_now
+import skill_sorter
+from fastapi import UploadFile
+from sqlmodel import Session, delete, func, or_, select
+
+from db import (Agent, Course, OrganizerRun, Skill, SkillCategory, SkillSeen, SkillTree, SkillVote, StoredFile, User, as_utc,
+                utc_now)
 from permissions import can_see_tree, can_view_course, course_name
 from security import Viewer
 from uploads import UploadRefused, delete_stored_file, save_upload
@@ -135,6 +138,7 @@ class MarketQuery:
     source: str = ""  # "member", "agent" or "" (both)
     sort: str = "category"
     mine: bool = False
+    reuse: str = ""  # "common", "personal" or "" (both): Masuda's flag
 
 
 def listed_skills(db: Session, viewer: Viewer, course: Course, query: MarketQuery) -> list[Skill]:
@@ -152,6 +156,8 @@ def listed_skills(db: Session, viewer: Viewer, course: Course, query: MarketQuer
         statement = statement.where(Skill.agent_name.is_(None), Skill.builtin.is_(None))
     if query.mine:
         statement = statement.where(Skill.owner_id == viewer.id)
+    if query.reuse in SCOPES:
+        statement = statement.where(Skill.scope == query.reuse, Skill.builtin.is_(None))
     if query.category == "none":
         statement = statement.where(Skill.category_id.is_(None))
     elif query.category.isdigit():
@@ -270,6 +276,8 @@ def save_skill(db: Session, *, course: Course, owner: User, content: str, name: 
     skill.share = share
     skill.updated_at = utc_now()
     db.add(skill)
+    db.flush()
+    file_skill(db, skill, fixed_categories(db))  # filed straight away by the rules (cheap)
     db.commit()
     db.refresh(skill)
     return skill, created
@@ -433,29 +441,11 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/free"  # OpenRouter picks an available free model
 PROMPT_BUDGET = 60_000  # characters of skill text sent to the model in one request
 
-# The starting categories, used by the keyword rules (and offered to the AI,
-# which may reword them or add others).
-RULES = [
-    ("Data retrieval", "Find and fetch information: searching the web, APIs, databases or papers, and "
-     "collecting the results.", "search fetch retrieve scrape crawl query api download lookup collect source "
-     "arxiv database sql http rss gather find"),
-    ("Data processing and analysis", "Turn raw data into something usable: cleaning, transforming, "
-     "summarising, measuring and comparing.", "analyze analyse analysis clean transform parse summarize "
-     "summarise statistics aggregate extract classify cluster compare pandas csv metric"),
-    ("Decision frameworks", "Help an agent choose what to do: criteria, rubrics, trade-offs, priorities and "
-     "when to stop or ask.", "decide decision choose evaluate criteria rubric prioritize prioritise tradeoff "
-     "trade-off judge score risk strategy should option weigh"),
-    ("Planning and orchestration", "Break work into steps and coordinate them: plans, task lists, schedules, "
-     "and working with other agents.", "plan planning step steps workflow orchestrate coordinate schedule "
-     "task tasks subtask delegate pipeline loop agents sequence"),
-    ("Writing and communication", "Produce text for people: reports, emails, summaries for readers, "
-     "translations and presentations.", "write writing report email draft translate tone audience present "
-     "presentation slides explain message letter essay"),
-    ("Coding and tools", "Write, run or fix code, and use developer tools and file formats.",
-     "code coding python javascript function test debug script tool tools git repository compile run "
-     "command shell"),
-]
-GENERAL = ("General", "Skills that don't fit one of the other categories yet.")
+# The categories: the class's 9 from its skill tree (Oct 2026) plus the
+# "Shared foundation" lane, as in Raiyaan's skill sorter (skill_sorter.py).
+# Every skill is filed into one of them; the organizer never invents others.
+FIXED = [(c["id"], c["name"], c["question"]) for c in [skill_sorter.FOUNDATION] + skill_sorter.CATEGORIES]
+SCOPES = {"personal": "Personal", "common": "Common candidate"}
 
 _lock = threading.Lock()  # one organizer run at a time
 
@@ -560,94 +550,138 @@ def run_if_due(db: Session, trigger_name: str | None = None) -> OrganizerRun | N
     return run(db, trigger_name or reason)
 
 
-# --- Organizing with keyword rules (no AI) ---------------------------------------------------------
+# --- Organizing: the class's fixed categories, rules first, AI only when unsure -----------------------
 
 
-def _words(text: str) -> list[str]:
-    return re.findall(r"[a-zA-Z][a-zA-Z\-]+", text.casefold())
+def fixed_categories(db: Session) -> dict[int, SkillCategory]:
+    """The 10 fixed categories (number -> row), created or brought up to date.
+    Categories from before (invented by the old organizer) are removed; their
+    skills are filed again."""
+    rows = {}
+    for number, name, description in FIXED:
+        rows[number] = upsert_category(db, name, description, number)
+    keep = {row.id for row in rows.values()}
+    for old in db.exec(select(SkillCategory)).all():
+        if old.id not in keep:
+            for skill in db.exec(select(Skill).where(Skill.category_id == old.id)).all():
+                skill.category_id = None
+                db.add(skill)
+            db.flush()
+            db.delete(old)
+    db.flush()
+    return rows
+
+
+def forget_votes(db: Session, skill_ids) -> None:
+    """Delete the votes (and "checked" marks) on these skills, before the
+    skills go. The caller commits."""
+    ids = list(skill_ids)
+    if ids:
+        db.exec(delete(SkillVote).where(SkillVote.skill_id.in_(ids)))
+        db.exec(delete(SkillSeen).where(SkillSeen.skill_id.in_(ids)))
+
+
+def unseen(db: Session, viewer: Viewer, skills: list[Skill]) -> dict[int, str]:
+    """The skills that are new ("new") or updated ("updated") for this member
+    since they last opened them. Their own skills and built-in ones don't count."""
+    candidates = [s for s in skills if not s.builtin and s.owner_id != viewer.id]
+    if not candidates or not viewer.is_member:
+        return {}
+    seen = {row.skill_id: row.version for row in db.exec(select(SkillSeen).where(
+        SkillSeen.user_id == viewer.id, SkillSeen.skill_id.in_([s.id for s in candidates]))).all()}
+    return {s.id: ("new" if s.id not in seen else "updated") for s in candidates
+            if s.id not in seen or seen[s.id] < s.version}
+
+
+def mark_seen(db: Session, viewer: Viewer, skills: list[Skill]) -> None:
+    """This member has checked these skills (their current versions). Commits."""
+    if not viewer.is_member:
+        return
+    for skill in skills:
+        row = db.get(SkillSeen, (viewer.id, skill.id)) or SkillSeen(user_id=viewer.id, skill_id=skill.id)
+        row.version = skill.version
+        db.add(row)
+    db.commit()
+
+
+def market_skills(db: Session, course: Course) -> list[Skill]:
+    """Every member's skill on this class's market (its own and seminar-wide ones)."""
+    return list(db.exec(select(Skill).where(Skill.builtin.is_(None),
+                                            or_(Skill.course_id == course.id, Skill.share == "seminar"))).all())
+
+
+def adopt_fixed_categories(db: Session) -> None:
+    """At startup: if the stored categories aren't the class's fixed ones yet
+    (a database from before), file every skill into them by the rules, once."""
+    names = [(c.position, c.name) for c in categories(db)]
+    if names != [(number, name) for number, name, _ in FIXED]:
+        organize_with_rules(db)
+        print("Skill market: skills filed into the class's 9 categories + Shared foundation")
+
+
+def number_of(db: Session, skill: Skill) -> int | None:
+    """A skill's category number (0-9), or None."""
+    category = db.get(SkillCategory, skill.category_id) if skill.category_id else None
+    return category.position if category else None
+
+
+def file_skill(db: Session, skill: Skill, rows: dict[int, SkillCategory]) -> dict:
+    """File one skill by Raiyaan's rules (its frontmatter first), unless its
+    owner chose the category. Returns the sorter's result. The caller commits."""
+    meta, body = skill_sorter.parse_frontmatter(skill.content or "")
+    skill.planned = str(meta.get("status", "")).strip().lower() == "planned" or skill.planned
+    if skill.category_source == "owner":
+        return {"category": number_of(db, skill), "needs_review": False}
+    description = str(meta.get("description") or skill.summary or "")
+    result = skill_sorter.sort_skill(skill.name, description, skill_sorter._headings(body) + " " + body, meta)
+    if result["category"] is None and str(meta.get("role", "")).lower() == "foundation":
+        result.update(category=0, category_source="frontmatter", confidence=1.0, needs_review=False)
+    skill.category_id = rows[result["category"]].id if result["category"] is not None else None
+    skill.category_source = result["category_source"]
+    skill.category_confidence = result["confidence"]
+    skill.specialty = f"Why here: {result['reason']}." if result.get("reason") else None
+    skill.organized_version = skill.version
+    db.add(skill)
+    return result
 
 
 def organize_with_rules(db: Session) -> int:
-    """Put each skill in the category whose keywords it uses most. Commits."""
-    lookup = {}
-    for position, (name, description, _) in enumerate(RULES + [GENERAL + ("",)]):
-        lookup[name] = upsert_category(db, name, description, position)
-    keywords = {name: set(words.split()) for name, _, words in RULES}
-    trees = {t.agent_id: t.content for t in db.exec(select(SkillTree)).all()}
+    """File every skill into the fixed categories by the rules. Commits."""
+    rows = fixed_categories(db)
     skills = list(db.exec(select(Skill).where(Skill.builtin.is_(None))).all())
     for skill in skills:
-        text = " ".join([skill.name, skill.summary or "", skill.content[:4000], trees.get(skill.agent_id, "")[:1000]])
-        words = _words(text)
-        scores = {name: sum(1 for word in words if word in keys) for name, keys in keywords.items()}
-        best = max(scores, key=scores.get)
-        category = lookup[best] if scores[best] > 0 else lookup[GENERAL[0]]
-        skill.category_id = category.id
-        # The category's keywords this skill uses, in the order it uses them.
-        found = [word for word in dict.fromkeys(words) if word in keywords.get(category.name, set())]
-        skill.specialty = ("Keywords: " + ", ".join(found[:5]) + ". (Sorted by keyword rules; the AI organizer "
-                           "writes a fuller note when it's set up.)") if found else None
-        skill.organized_version = skill.version
-        db.add(skill)
-    remove_unused_categories(db, {lookup[name].id for name in lookup})
+        file_skill(db, skill, rows)
     db.commit()
     return len(skills)
 
 
 def upsert_category(db: Session, name: str, description: str, position: int) -> SkillCategory:
-    category = db.exec(select(SkillCategory).where(SkillCategory.name == name)).first()
+    category = db.exec(select(SkillCategory).where(SkillCategory.position == position)).first() or \
+        db.exec(select(SkillCategory).where(SkillCategory.name == name)).first()
     category = category or SkillCategory(name=name)
-    category.description, category.position, category.updated_at = description, position, utc_now()
+    category.name, category.description, category.position, category.updated_at = name, description, position, utc_now()
     db.add(category)
     db.flush()
     return category
 
 
-def remove_unused_categories(db: Session, keep_ids: set[int]) -> None:
-    """Delete categories that are no longer offered and hold no skills."""
-    for category in db.exec(select(SkillCategory)).all():
-        if category.id in keep_ids:
-            continue
-        if db.exec(select(Skill.id).where(Skill.category_id == category.id)).first() is None:
-            db.delete(category)
-
-
-# --- Organizing with AI (OpenRouter) -------------------------------------------------------------------
-
-
-def build_prompt(db: Session) -> tuple[str, list[Skill]]:
-    """The request to the model: the current categories, every skill (shortened
-    to fit PROMPT_BUDGET), and the skill trees that place them."""
-    skills = list(db.exec(select(Skill).where(Skill.builtin.is_(None)).order_by(Skill.id)).all())
-    trees = {t.agent_id: t.content for t in db.exec(select(SkillTree)).all()}
+def build_prompt(skills: list[Skill]) -> str:
+    """The request to the model: the fixed categories and the skills the rules
+    weren't sure about."""
     per_skill = max(400, min(2000, PROMPT_BUDGET // max(1, len(skills))))
-    existing = [{"name": c.name, "description": c.description} for c in categories(db)] or \
-               [{"name": n, "description": d} for n, d, _ in RULES]
     lines = [
-        "You organize a marketplace of 'skill' files (Markdown instructions) that AI agents use.",
-        "Group the skills into categories BY FUNCTION: what the skill makes an agent able to do. For example, a skill",
-        "about retrieving data belongs apart from one that is a decision framework. Reuse the existing categories",
-        "when they fit (you may improve their descriptions); add or merge categories only when that clearly helps.",
-        "Use 3 to 10 categories. For each category write a description (1-2 sentences) of what skills in it are",
-        "expected to do. For each skill write a 'specialty' (1-2 sentences): what sets it apart from the other",
-        "skills in its category. A skill tree says where each skill sits inside its agent; use it as context.",
-        "Answer with JSON only, exactly in this shape:",
-        '{"categories": [{"name": "...", "description": "..."}], "skills": [{"id": 1, "category": "...", "specialty": "..."}]}',
-        "",
-        "EXISTING CATEGORIES:", json.dumps(existing, ensure_ascii=False),
+        "You file 'skill' files (Markdown instructions that AI agents use) into a research seminar's fixed",
+        "categories. Pick exactly one category number for each skill, by its MAIN OUTPUT. For each skill also",
+        "write a 'specialty' (1 sentence): what sets it apart. Answer with JSON only, exactly in this shape:",
+        '{"skills": [{"id": 1, "category": 4, "specialty": "..."}]}',
+        "", "CATEGORIES:",
+        json.dumps([{"number": n, "name": name, "main output": d} for n, name, d in FIXED], ensure_ascii=False),
         "", "SKILLS:",
     ]
     for skill in skills:
         lines.append(json.dumps({"id": skill.id, "name": skill.name, "summary": skill.summary,
-                                 "by": "agent" if skill.agent_name else "member",
                                  "text": skill.content[:per_skill]}, ensure_ascii=False))
-        if skill.agent_id in trees:
-            lines.append(json.dumps({"skill_tree_of_skill": skill.id,
-                                     "tree": trees[skill.agent_id][:per_skill // 2]}, ensure_ascii=False))
-    return "\n".join(lines), skills
-
-
-def model_name() -> str:
-    return (os.getenv("OPENROUTER_MODEL") or DEFAULT_MODEL).strip()
+    return "\n".join(lines)
 
 
 def ask_model(prompt: str) -> str:
@@ -656,13 +690,16 @@ def ask_model(prompt: str) -> str:
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {ai_key()}", "Content-Type": "application/json",
                  "X-Title": "Fukuhara Research Seminar Dashboard"},
-        json={"model": (os.getenv("OPENROUTER_MODEL") or DEFAULT_MODEL).strip(),
-              "messages": [{"role": "user", "content": prompt}], "temperature": 0.2},
+        json={"model": model_name(), "messages": [{"role": "user", "content": prompt}], "temperature": 0.2},
         timeout=180,
     )
     if not response.ok:
         raise RuntimeError(f"OpenRouter answered HTTP {response.status_code}: {response.text[:200]}")
     return response.json()["choices"][0]["message"]["content"]
+
+
+def model_name() -> str:
+    return (os.getenv("OPENROUTER_MODEL") or DEFAULT_MODEL).strip()
 
 
 def parse_reply(reply: str) -> dict:
@@ -671,40 +708,31 @@ def parse_reply(reply: str) -> dict:
     if start < 0 or end < start:
         raise ValueError("the model's reply had no JSON in it")
     data = json.loads(reply[start:end + 1])
-    if not isinstance(data.get("categories"), list) or not isinstance(data.get("skills"), list):
-        raise ValueError("the model's reply didn't have categories and skills")
+    if not isinstance(data.get("skills"), list):
+        raise ValueError("the model's reply didn't list the skills")
     return data
 
 
 def organize_with_ai(db: Session) -> int:
-    """Organize the market with one OpenRouter request. Commits.
-
-    If the reply can't be used, nothing changes (the error is reported)."""
-    prompt, skills = build_prompt(db)
-    if not skills:
-        return 0
-    data = parse_reply(ask_model(prompt))
-    lookup = {}
-    for position, item in enumerate(data["categories"][:12]):
-        name = " ".join(str(item.get("name") or "").split())[:60]
-        if name and name not in lookup:
-            lookup[name] = upsert_category(db, name, " ".join(str(item.get("description") or "").split())[:600],
-                                           position)
-    general = None
-    by_id = {skill.id: skill for skill in skills}
+    """File every skill by the rules, then ask the AI (one request) about the
+    ones the rules weren't sure of. Commits. If the AI's reply can't be used,
+    the rules' filing stays."""
+    rows = fixed_categories(db)
+    skills = list(db.exec(select(Skill).where(Skill.builtin.is_(None)).order_by(Skill.id)).all())
+    unsure = [skill for skill in skills if file_skill(db, skill, rows).get("needs_review")]
+    db.commit()
+    if not unsure:
+        return len(skills)
+    data = parse_reply(ask_model(build_prompt(unsure)))
+    by_id = {skill.id: skill for skill in unsure}
     for item in data["skills"]:
         skill = by_id.get(item.get("id")) if isinstance(item, dict) else None
-        if skill is None:
+        number = item.get("category") if isinstance(item, dict) else None
+        if skill is None or not isinstance(number, int) or number not in rows:
             continue
-        category = lookup.get(" ".join(str(item.get("category") or "").split())[:60])
-        if category is None:
-            general = general or upsert_category(db, *GENERAL, len(lookup))
-            category = general
-        skill.category_id = category.id
-        skill.specialty = " ".join(str(item.get("specialty") or "").split())[:600] or None
-        skill.organized_version = skill.version
+        skill.category_id, skill.category_source = rows[number].id, "ai"
+        skill.specialty = " ".join(str(item.get("specialty") or "").split())[:600] or skill.specialty
         db.add(skill)
-    remove_unused_categories(db, {c.id for c in lookup.values()} | ({general.id} if general else set()))
     db.commit()
     return len(skills)
 

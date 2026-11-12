@@ -1,0 +1,11 @@
+{# Up / down votes on a skill (routes/skills.py vote): the total sizes its node
+   on the skill map. Your own vote is highlighted; clicking it again takes it back. #}
+<div id="skill-vote-{{ vote_skill.id }}" class="join items-center" aria-label="Rate this skill">
+  <button type="button" class="btn btn-xs join-item {{ 'btn-success' if my_vote == 1 }}" hx-post="/skills/{{ vote_skill.id }}/vote"
+          hx-vals='{"value": 1}' hx-target="#skill-vote-{{ vote_skill.id }}" hx-swap="outerHTML"
+          aria-pressed="{{ 'true' if my_vote == 1 else 'false' }}" title="Upvote">&#9650;</button>
+  <span class="join-item px-2 font-mono text-sm font-bold" title="Votes: ups minus downs">{{ "%+d" % vote_score if vote_score else 0 }}</span>
+  <button type="button" class="btn btn-xs join-item {{ 'btn-error' if my_vote == -1 }}" hx-post="/skills/{{ vote_skill.id }}/vote"
+          hx-vals='{"value": -1}' hx-target="#skill-vote-{{ vote_skill.id }}" hx-swap="outerHTML"
+          aria-pressed="{{ 'true' if my_vote == -1 else 'false' }}" title="Downvote">&#9660;</button>
+</div>

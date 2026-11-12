@@ -1,0 +1,64 @@
+{% extends "partials/modal.html" %}
+{# Raiyaan's skill sorter (routes/skill_upload.py): either why the zip was
+   rejected (every problem at once), or "Check your skills": each skill's
+   suggested category (unsure ones highlighted), common or personal, and a
+   tick to publish it. Nothing goes on the market until "Publish". #}
+{% block size %}max-w-4xl{% endblock %}
+{% block body %}
+{% if errors %}
+<div class="space-y-3">
+  <h3 class="text-lg font-bold">The zip can't be used yet</h3>
+  <p class="text-sm">Fix these and upload it again. Nothing was saved.</p>
+  <ul class="list-disc space-y-1 pl-5 text-sm text-error">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  <p class="text-xs text-base-content/70">The layout: <code>skills/&lt;skill-name&gt;/SKILL.md</code> (lowercase letters,
+    digits and hyphens), each starting with <code>---</code> frontmatter holding <code>name:</code> (the folder's name)
+    and <code>description:</code>. Optional folders inside a skill: <code>scripts/</code>, <code>references/</code>, <code>assets/</code>.
+    <a href="/connector/rulebook" class="link">Full rules</a> &middot; <a href="/connector/skill-template" class="link">SKILL.md template</a></p>
+  <div class="modal-action"><button type="button" class="btn" @click="$el.closest('.modal').remove()">Close</button></div>
+</div>
+{% else %}
+{% set n_unsure = upload.skills | rejectattr("blocked") | selectattr("needs_review") | list | length %}
+<form class="space-y-4" hx-post="/agents/{{ agent.id }}/skills/zip/{{ upload.id }}/publish">
+  <div class="space-y-1">
+    <h3 class="text-lg font-bold">Check your skills &middot; {{ agent.name }}</h3>
+    <p class="text-sm">{{ upload.skills | length }} skill{{ "s" if upload.skills | length != 1 }} in {{ upload.filename }}.
+      {% if n_unsure %}<strong>{{ n_unsure }}</strong> need{{ "s" if n_unsure == 1 }} your choice of category (highlighted).{% endif %}
+      Change anything that's wrong, then publish.</p>
+    {% if upload.warnings %}<ul class="list-disc pl-5 text-xs text-base-content/70">{% for w in upload.warnings %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  <div class="max-h-[55vh] overflow-auto">
+    <table class="table table-sm">
+      <thead><tr><th>Publish</th><th>Skill</th><th>Category</th><th>Who could use it</th></tr></thead>
+      <tbody>
+        {% for s in upload.skills %}{% set i = loop.index0 %}
+        <tr class="{{ 'zip-unsure' if s.needs_review and not s.blocked }} {{ 'opacity-60' if s.blocked }}">
+          <td>{% if s.blocked %}<span class="badge badge-error badge-sm" title="{{ s.warnings | join('; ') }}">blocked</span>
+            {% else %}<input type="checkbox" name="include_{{ i }}" value="true" checked class="checkbox checkbox-sm" aria-label="Publish {{ s.name }}">{% endif %}</td>
+          <td class="max-w-72"><strong>{{ s.name }}</strong>{% if s.planned %} <span class="badge badge-ghost badge-xs">planned</span>{% endif %}
+            <br><span class="text-xs">{{ s.description }}</span>
+            {% for w in s.warnings %}<br><span class="text-xs text-error">&#9888; {{ w }}</span>{% endfor %}</td>
+          <td>
+            <select name="category_{{ i }}" class="select select-sm w-56" {{ "disabled" if s.blocked }}>
+              {% if s.category is none %}<option value="" selected>Choose&hellip;</option>{% endif %}
+              {% for number, label, question in fixed_categories %}
+              <option value="{{ number }}" {{ "selected" if s.category == number }}>{{ number }} &middot; {{ label }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-[0.7rem] text-base-content/70">{% if s.needs_review %}Unsure: please choose.{% else %}{{ s.reason }}{% endif %}</p>
+          </td>
+          <td>{% for value, label in scopes.items() %}
+            <label class="flex items-center gap-1.5 text-xs"><input type="radio" name="scope_{{ i }}" value="{{ value }}" class="radio radio-xs"
+              {{ "checked" if (value == "common") == (s.reusability in common_hints) }} {{ "disabled" if s.blocked }}> {{ label }}</label>
+          {% endfor %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="modal-action">
+    <button type="button" class="btn btn-ghost" @click="$el.closest('.modal').remove()">Cancel</button>
+    <button type="submit" class="btn btn-primary">Publish to the market</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

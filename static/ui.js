@@ -355,3 +355,381 @@ document.addEventListener("click", (event) => {
   document.addEventListener("htmx:afterSettle", tick);
   setInterval(() => { tick(); watchTyping(); }, 1000);
 })();
+
+// The skill map graph (partials/skill_map.html, [data-sg-root]).
+// - Click a skill node: open it; click a category node: that category (HTMX).
+// - "Draw a path": click skill nodes, or press and drag across them, to pick
+//   them in order; the path is drawn through them, listed below, and
+//   "Download zip" sends their ids to the server (skills by category folder).
+// - "Highlight": dims everyone else's skill nodes.
+(function () {
+  const SVG = "http://www.w3.org/2000/svg";
+
+  function setUp(root) {
+    if (root.dataset.sgReady) return;
+    root.dataset.sgReady = "1";
+    const svg = root.querySelector("[data-skill-graph]");
+    const panel = root.querySelector("[data-sg-panel]");
+    const modeButton = root.querySelector("[data-sg-mode]");
+    const hint = root.querySelector("[data-sg-hint]");
+    const route = root.querySelector("[data-sg-route]");
+    const orderLayer = root.querySelector("[data-sg-order]");
+    const ownerSelect = root.parentElement.querySelector("[data-sg-owner]");
+    let drawing = false, dragging = false;
+    const path = [];
+    // Where a path may go next from each skill (along the map's lines), from the server.
+    const following = JSON.parse(svg.dataset.sgNext || "{}");
+    const canGo = (from, to) => (following[from] || []).map(String).includes(String(to));
+
+    const nodeOf = (el) => el && el.closest && el.closest("[data-sg-skill]");
+    // Where a node is now (it may have been dragged: data-px / data-py), else where it was drawn.
+    const info = (node) => ({ id: node.dataset.sgSkill, x: +(node.dataset.px || node.dataset.x),
+                              y: +(node.dataset.py || node.dataset.y),
+                              name: node.dataset.name, category: node.dataset.category, node });
+
+    function draw() {
+      route.setAttribute("d", path.map((p, i) => (i ? "L" : "M") + p.x + "," + p.y).join(" "));
+      orderLayer.replaceChildren();
+      root.querySelectorAll(".sg-picked").forEach((n) => n.classList.remove("sg-picked"));
+      path.forEach((p, i) => {
+        p.node.classList.add("sg-picked");
+        const tag = document.createElementNS(SVG, "text");
+        tag.setAttribute("x", p.x); tag.setAttribute("y", p.y + 24);
+        tag.setAttribute("class", "sg-order"); tag.textContent = i + 1;
+        orderLayer.appendChild(tag);
+      });
+      // Show where the path can go next; dim the rest.
+      const last = path[path.length - 1];
+      root.querySelectorAll("[data-sg-skill]").forEach((n) => {
+        const reachable = drawing && last && canGo(last.id, n.dataset.sgSkill);
+        n.classList.toggle("sg-next", !!reachable);
+        n.classList.toggle("sg-blocked", !!(drawing && last && !reachable && !n.classList.contains("sg-picked")));
+      });
+      root.querySelector("[data-sg-count]").textContent = path.length;
+      root.querySelector("[data-sg-download]").disabled = path.length === 0;
+      const list = root.querySelector("[data-sg-list]");
+      list.replaceChildren(...path.map((p) => {
+        const li = document.createElement("li");
+        li.textContent = p.name + (p.category === "misc" ? " (no category)" : " (category " + p.category + ")");
+        return li;
+      }));
+      root.querySelector("[data-sg-inputs]").replaceChildren(...path.map((p) => {
+        const input = document.createElement("input");
+        input.type = "hidden"; input.name = "ids"; input.value = p.id;
+        return input;
+      }));
+    }
+
+    function pick(node, toggleLast) {
+      const p = info(node);
+      const last = path[path.length - 1];
+      if (last && last.id === p.id) { if (toggleLast) { path.pop(); draw(); } return; }
+      if (path.some((q) => q.id === p.id)) return; // each skill once
+      if (last && !canGo(last.id, p.id)) {  // not along the map's lines: refuse it
+        if (toggleLast) {
+          node.classList.add("sg-refused");
+          setTimeout(() => node.classList.remove("sg-refused"), 600);
+          hint.textContent = "Can't go there from " + last.name + ": follow the lines left to right.";
+        }
+        return;
+      }
+      path.push(p); draw();
+    }
+
+    function setMode(on) {
+      drawing = on;
+      svg.classList.toggle("sg-drawing", on);
+      modeButton.setAttribute("aria-pressed", on ? "true" : "false");
+      modeButton.classList.toggle("btn-primary", on);
+      panel.hidden = !on;
+      draw();
+      hint.textContent = on ? "Click or drag across skill nodes to pick them, in order." :
+                              "Click a skill to open it, or a category to see it across the class.";
+    }
+
+    modeButton.addEventListener("click", () => setMode(!drawing));
+    root.querySelector("[data-sg-undo]").addEventListener("click", () => { path.pop(); draw(); });
+    root.querySelector("[data-sg-clear]").addEventListener("click", () => { path.length = 0; draw(); });
+
+    // The path follows nodes that are being dragged around.
+    root.addEventListener("sg-moved", () => {
+      if (!path.length) return;
+      path.forEach((p) => { const q = info(p.node); p.x = q.x; p.y = q.y; });
+      route.setAttribute("d", path.map((p, i) => (i ? "L" : "M") + p.x + "," + p.y).join(" "));
+      orderLayer.querySelectorAll("text").forEach((tag, i) => { tag.setAttribute("x", path[i].x); tag.setAttribute("y", path[i].y + 24); });
+    });
+
+    svg.addEventListener("click", (event) => {
+      if (root.dataset.sgDragged === "1") {  // that was a drag, not a click
+        root.dataset.sgDragged = "";
+        event.stopPropagation(); event.preventDefault();
+        return;
+      }
+      const node = nodeOf(event.target);
+      if (drawing) {
+        event.stopPropagation(); event.preventDefault(); // categories don't open while drawing
+        return;
+      }
+      if (node && window.htmx) {
+        event.stopPropagation();
+        htmx.ajax("GET", "/skills/" + node.dataset.sgSkill, { target: "#modal" });
+      }
+    }, true);
+    svg.addEventListener("keydown", (event) => {
+      const node = nodeOf(event.target);
+      if (!node || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      if (drawing) pick(node, true); else htmx.ajax("GET", "/skills/" + node.dataset.sgSkill, { target: "#modal" });
+    });
+    svg.addEventListener("pointerdown", (event) => {
+      if (!drawing) return;
+      const node = nodeOf(event.target);
+      if (!node) return;
+      event.preventDefault();
+      dragging = true;
+      pick(node, true);
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (!drawing || !dragging) return;
+      const node = nodeOf(document.elementFromPoint(event.clientX, event.clientY));
+      if (node) pick(node, false);
+    });
+    window.addEventListener("pointerup", () => { dragging = false; });
+
+    if (ownerSelect) {
+      ownerSelect.addEventListener("change", () => {
+        const owner = ownerSelect.value;
+        root.querySelectorAll("[data-sg-skill]").forEach((n) => {
+          n.classList.toggle("sg-dim", owner !== "" && n.dataset.owner !== owner);
+        });
+      });
+    }
+  }
+
+  function setUpAll() { document.querySelectorAll("[data-sg-root]").forEach(setUp); }
+  document.addEventListener("DOMContentLoaded", setUpAll);
+  document.addEventListener("htmx:afterSettle", setUpAll);
+})();
+
+// A vote on a skill (the server's HX-Trigger "skill-voted"): resize its node
+// on the skill map and update its total on the market cards, straight away.
+document.body.addEventListener("skill-voted", (event) => {
+  const { id, score, r } = event.detail;
+  document.querySelectorAll('[data-sg-skill="' + id + '"]').forEach((node) => {
+    const dot = node.querySelector("circle");
+    const x = +node.dataset.x, y = +node.dataset.y;
+    dot.setAttribute("r", r);
+    const badge = node.querySelector(".sg-new");
+    if (badge) {
+      badge.querySelector("circle").setAttribute("cx", x + r * 0.75);
+      badge.querySelector("circle").setAttribute("cy", y - r * 0.75);
+      badge.querySelector("text").setAttribute("x", x + r * 0.75);
+      badge.querySelector("text").setAttribute("y", y - r * 0.75);
+    }
+    node.dataset.score = score;  // the hover label reads it
+  });
+  document.querySelectorAll('[data-vote-for="' + id + '"]').forEach((span) => {
+    span.textContent = score > 0 ? "▲+" + score : score < 0 ? "▼" + score : "±0";
+    span.classList.toggle("text-success", score > 0);
+    span.classList.toggle("text-error", score < 0);
+  });
+});
+
+
+// Dragging on the skill map, with a little physics. Skill nodes and category
+// nodes can be moved; a category carries its skills, and every line follows.
+// Each node may rest anywhere within a "slack" distance of where it was drawn;
+// dragged further, it's pulled back to that edge by a spring when let go.
+// Skill nodes stay inside their category; miscellaneous ones stay outside.
+// The animation only runs while something is moving.
+(function () {
+  const SLACK = { skill: 40, category: 70 };
+  const SPRING = 90, DAMPING = 0.86, STEP = 1 / 60;
+
+  function smooth(points) {
+    let d = "M" + points[0][0].toFixed(1) + "," + points[0][1].toFixed(1);
+    for (let i = 1; i < points.length; i++) {
+      const [x0, y0] = points[i - 1], [x1, y1] = points[i], mid = (x0 + x1) / 2;
+      d += " C" + mid.toFixed(1) + "," + y0.toFixed(1) + " " + mid.toFixed(1) + "," + y1.toFixed(1) + " " + x1.toFixed(1) + "," + y1.toFixed(1);
+    }
+    return d;
+  }
+
+  function setUp(root) {
+    if (root.dataset.sgPhysics) return;
+    root.dataset.sgPhysics = "1";
+    const svg = root.querySelector("[data-skill-graph]");
+    const cats = {}, skills = {};
+    svg.querySelectorAll("[data-sg-cat]").forEach((el) => {
+      cats[el.dataset.sgCat] = { kind: "category", el, cx: +el.dataset.cx, cy: +el.dataset.cy, r: +el.dataset.r,
+                                 ox: 0, oy: 0, vx: 0, vy: 0 };
+    });
+    svg.querySelectorAll("[data-sg-skill]").forEach((el) => {
+      const cat = el.dataset.category === "misc" ? null : cats[el.dataset.category] || null;
+      skills[el.dataset.sgSkill] = { kind: "skill", el, x: +el.dataset.x, y: +el.dataset.y, r: +el.dataset.r || 11,
+                                     cat, ox: 0, oy: 0, vx: 0, vy: 0 };
+    });
+    const mains = [...svg.querySelectorAll(".sg-main")];
+    const lanes = [...svg.querySelectorAll(".sg-inner")];
+    const miscLines = [...svg.querySelectorAll(".sg-misc-edge")];
+
+    const at = (s) => [s.x + s.ox + (s.cat ? s.cat.ox : 0), s.y + s.oy + (s.cat ? s.cat.oy : 0)];
+
+    function keepIn(s) {
+      if (s.cat) {  // inside its category
+        const room = s.cat.r - s.r - 4, dx = s.x + s.ox - s.cat.cx, dy = s.y + s.oy - s.cat.cy;
+        const d = Math.hypot(dx, dy);
+        if (d > room && d > 0) { s.ox += dx * (room / d - 1); s.oy += dy * (room / d - 1); }
+      } else {  // a miscellaneous skill: outside every category
+        for (const c of Object.values(cats)) {
+          const [x, y] = at(s), dx = x - (c.cx + c.ox), dy = y - (c.cy + c.oy), d = Math.hypot(dx, dy) || 1;
+          const need = c.r + s.r + 6;
+          if (d < need) { s.ox += dx / d * (need - d); s.oy += dy / d * (need - d); }
+        }
+      }
+    }
+
+    function render() {
+      Object.values(cats).forEach((c) => c.el.setAttribute("transform", "translate(" + c.ox.toFixed(1) + "," + c.oy.toFixed(1) + ")"));
+      Object.values(skills).forEach((s) => {
+        const dx = s.ox + (s.cat ? s.cat.ox : 0), dy = s.oy + (s.cat ? s.cat.oy : 0);
+        s.el.setAttribute("transform", "translate(" + dx.toFixed(1) + "," + dy.toFixed(1) + ")");
+        s.el.dataset.px = (s.x + dx).toFixed(1); s.el.dataset.py = (s.y + dy).toFixed(1);
+      });
+      mains.forEach((line) => {
+        const a = cats[line.dataset.sgFrom], b = cats[line.dataset.sgTo];
+        line.setAttribute("x1", a.cx + a.r + a.ox); line.setAttribute("y1", a.cy + a.oy);
+        line.setAttribute("x2", b.cx - b.r + b.ox); line.setAttribute("y2", b.cy + b.oy);
+      });
+      lanes.forEach((lane) => {
+        const c = cats[lane.dataset.sgLane];
+        const points = [[c.cx - c.r + c.ox, c.cy + c.oy]];
+        lane.dataset.sgIds.split(",").forEach((id) => skills[id] && points.push(at(skills[id])));
+        points.push([c.cx + c.r + c.ox, c.cy + c.oy]);
+        lane.setAttribute("d", smooth(points));
+      });
+      miscLines.forEach((line) => {
+        const a = skills[line.dataset.sgA], b = skills[line.dataset.sgB];
+        if (!a || !b) return;
+        const [x1, y1] = at(a), [x2, y2] = at(b);
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1); line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+      });
+      root.dispatchEvent(new CustomEvent("sg-moved"));
+    }
+
+    // The spring: anything further than its slack from where it was drawn is pulled back.
+    let running = false, held = null;
+    function tick() {
+      let moving = false;
+      for (const body of [...Object.values(cats), ...Object.values(skills)]) {
+        if (body === held) continue;
+        const slack = SLACK[body.kind], d = Math.hypot(body.ox, body.oy);
+        if (d > slack) {
+          const pull = SPRING * (d - slack) / d;
+          body.vx -= body.ox * pull * STEP; body.vy -= body.oy * pull * STEP;
+        }
+        body.vx *= DAMPING; body.vy *= DAMPING;
+        body.ox += body.vx * STEP; body.oy += body.vy * STEP;
+        if (body.kind === "skill") keepIn(body);
+        if (Math.abs(body.vx) + Math.abs(body.vy) > 1 || d > slack + 0.5) moving = true;
+      }
+      render();
+      if (moving || held) requestAnimationFrame(tick); else running = false;
+    }
+    function start() { if (!running) { running = true; requestAnimationFrame(tick); } }
+
+    // Dragging (not while drawing a path, which uses the pointer itself).
+    let drag = null;
+    function svgPoint(event) {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX; point.y = event.clientY;
+      return point.matrixTransform(svg.getScreenCTM().inverse());
+    }
+    svg.addEventListener("pointerdown", (event) => {
+      if (svg.classList.contains("sg-drawing") || event.button > 0) return;
+      const node = event.target.closest("[data-sg-skill]");
+      const cat = !node && event.target.closest(".sg-cat") && event.target.closest("[data-sg-cat]");
+      const body = node ? skills[node.dataset.sgSkill] : cat ? cats[cat.dataset.sgCat] : null;
+      if (!body) return;
+      const p = svgPoint(event);
+      drag = { body, startX: p.x, startY: p.y, ox: body.ox, oy: body.oy, moved: false, id: event.pointerId };
+    });
+    svg.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const p = svgPoint(event), dx = p.x - drag.startX, dy = p.y - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;  // a click, so far
+      if (!drag.moved) { drag.moved = true; held = drag.body; svg.setPointerCapture(event.pointerId); svg.classList.add("sg-dragging"); start(); }
+      event.preventDefault();
+      drag.body.ox = drag.ox + dx; drag.body.oy = drag.oy + dy; drag.body.vx = 0; drag.body.vy = 0;
+      if (drag.body.kind === "skill") keepIn(drag.body);
+    });
+    function release() {
+      if (!drag) return;
+      if (drag.moved) { root.dataset.sgDragged = "1"; setTimeout(() => { root.dataset.sgDragged = ""; }, 0); }
+      held = null; drag = null; svg.classList.remove("sg-dragging");
+      start();
+    }
+    svg.addEventListener("pointerup", release);
+    svg.addEventListener("pointercancel", release);
+  }
+
+  function setUpAll() { document.querySelectorAll("[data-sg-root]").forEach(setUp); }
+  document.addEventListener("DOMContentLoaded", setUpAll);
+  document.addEventListener("htmx:afterSettle", setUpAll);
+})();
+
+
+// The skill map's hover label: a skill node's name and creator (and agent,
+// status and votes), right next to it. Shown on hover or keyboard focus,
+// hidden while dragging, and kept beside the node as it moves.
+(function () {
+  function setUp(root) {
+    if (root.dataset.sgTip) return;
+    root.dataset.sgTip = "1";
+    const tip = root.querySelector("[data-sg-tip]");
+    const svg = root.querySelector("[data-skill-graph]");
+    if (!tip || !svg) return;
+    let shown = null;
+
+    function place() {
+      if (!shown) return;
+      const box = shown.querySelector("circle").getBoundingClientRect();
+      const frame = root.getBoundingClientRect();
+      tip.style.left = (box.left + box.width / 2 - frame.left) + "px";
+      tip.style.top = (box.top - frame.top - 8) + "px";
+    }
+    function show(node) {
+      if (svg.classList.contains("sg-dragging")) return;
+      shown = node;
+      const d = node.dataset, score = +d.score || 0;
+      const votes = score > 0 ? "▲+" + score : score < 0 ? "▼" + score : "±0 votes";
+      tip.replaceChildren();
+      const name = document.createElement("strong"); name.textContent = d.name;
+      const by = document.createElement("span"); by.textContent = "by " + d.ownerName + (d.agent ? " · " + d.agent : "");
+      const meta = document.createElement("span"); meta.className = "sg-tip-meta";
+      meta.textContent = d.status + " · " + votes + (d.new ? " · " + d.new + ", not checked yet" : "") +
+                         (d.category === "misc" ? " · no category" : "");
+      tip.append(name, by, meta);
+      tip.hidden = false;
+      place();
+    }
+    function hide() { shown = null; tip.hidden = true; }
+
+    svg.addEventListener("pointerover", (event) => {
+      const node = event.target.closest("[data-sg-skill]");
+      if (node) show(node);
+    });
+    svg.addEventListener("pointerout", (event) => {
+      const node = event.target.closest("[data-sg-skill]");
+      if (node && !node.contains(event.relatedTarget)) hide();
+    });
+    svg.addEventListener("focusin", (event) => { const node = event.target.closest("[data-sg-skill]"); if (node) show(node); });
+    svg.addEventListener("focusout", hide);
+    svg.addEventListener("pointerdown", hide);
+    root.addEventListener("sg-moved", place);
+    root.querySelector(".overflow-x-auto")?.addEventListener("scroll", place);
+  }
+  function setUpAll() { document.querySelectorAll("[data-sg-root]").forEach(setUp); }
+  document.addEventListener("DOMContentLoaded", setUpAll);
+  document.addEventListener("htmx:afterSettle", setUpAll);
+})();
