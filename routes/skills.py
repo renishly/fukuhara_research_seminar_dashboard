@@ -148,8 +148,8 @@ async def upload_skill(request: Request, course_id: int, name: str = Form(""), s
                                 name=name if len(contents) == 1 else None, summary=summary, share=share)[0]
               for content in contents]
     if len({skill.id for skill in skills}) == 1:
-        return hx_redirect(f"/classes/{course.id}?tab=agents&skill={skills[0].id}")
-    return hx_redirect(f"/classes/{course.id}?tab=agents")
+        return hx_redirect(f"/classes/{course.id}?tab=skills&skill={skills[0].id}")
+    return hx_redirect(f"/classes/{course.id}?tab=skills")
 
 
 @router.get("/skills/{skill_id}/edit")
@@ -186,7 +186,7 @@ async def edit_skill(request: Request, skill_id: int, summary: str = Form(""), s
     skill.updated_at = utc_now()
     db.add(skill)
     db.commit()
-    return hx_redirect(f"/classes/{skill.course_id}?tab=agents&skill={skill.id}")
+    return hx_redirect(f"/classes/{skill.course_id}?tab=skills&skill={skill.id}")
 
 
 @router.post("/skills/{skill_id}/delete")
@@ -198,7 +198,7 @@ def remove_skill(skill_id: int, viewer: Viewer = Depends(checked_member), db: Se
     course_id = skill.course_id
     db.delete(skill)
     db.commit()
-    return hx_redirect(f"/classes/{course_id}?tab=agents")
+    return hx_redirect(f"/classes/{course_id}?tab=skills")
 
 
 # --- Skill trees ----------------------------------------------------------------------------------------
@@ -249,7 +249,7 @@ async def upload_tree(request: Request, course_id: int, agent_id: int = Form(0),
     except market.SkillRefused as refusal:
         return tree_form(request, db, viewer, course, agent_id=agent.id, error=str(refusal), status_code=400,
                          values={"mode": mode, "content_text": content_text})
-    return hx_redirect(f"/classes/{course.id}?tab=agents")
+    return hx_redirect(f"/classes/{course.id}?tab=skills")
 
 
 @router.get("/skill-trees/{agent_id}")
@@ -280,7 +280,7 @@ def remove_tree(agent_id: int, viewer: Viewer = Depends(checked_member), db: Ses
     course_id = db.get(Agent, agent_id).course_id
     market.delete_tree(db, tree)
     db.commit()
-    return hx_redirect(f"/classes/{course_id}?tab=agents")
+    return hx_redirect(f"/classes/{course_id}?tab=skills")
 
 
 @router.post("/skill-trees/{agent_id}/view/delete")
@@ -290,7 +290,7 @@ def remove_tree_view(agent_id: int, viewer: Viewer = Depends(checked_member), db
     course_id = db.get(Agent, agent_id).course_id
     market.remove_tree_view(db, tree)
     db.commit()
-    return hx_redirect(f"/classes/{course_id}?tab=agents")
+    return hx_redirect(f"/classes/{course_id}?tab=skills")
 
 
 # --- Running the organizer --------------------------------------------------------------------------------

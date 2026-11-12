@@ -241,8 +241,8 @@ def test_classes_have_the_tabs_ticked_at_creation(make_person, create_class):
     all_three = create_class(title="All", enrolled_gens=[9])
     no_exams = create_class(title="No exams", enrolled_gens=[9], has_exams=False)
     only_assignments = create_class(title="Only assignments", enrolled_gens=[9], has_exams=False, has_agents=False)
-    assert tab_buttons(student.get(f"/classes/{all_three}").text) == ["assignments", "exams", "agents"]
-    assert tab_buttons(student.get(f"/classes/{no_exams}").text) == ["assignments", "agents"]
+    assert tab_buttons(student.get(f"/classes/{all_three}").text) == ["assignments", "exams", "agents", "skills"]
+    assert tab_buttons(student.get(f"/classes/{no_exams}").text) == ["assignments", "agents", "skills"]
     assert tab_buttons(student.get(f"/classes/{only_assignments}").text) == ["assignments"]
 
 
@@ -327,11 +327,22 @@ def test_a_class_opens_on_agents_if_it_has_that_tab(admin, create_class):
     assert "No assignments yet" in admin.get(f"/classes/{without}").text
 
 
-def test_my_agents_are_one_click_from_the_class_page(make_person, create_class, create_agent):
+def test_my_dashboard_link_sits_above_the_agents_tab(admin, make_person, create_class, create_agent):
     taro, hanako = make_person("student", "taro", gen=9), make_person("student", "hanako", gen=9)
     course = create_class(enrolled_gens=[9])
-    agent = create_agent(taro, course, "helper")
+    create_agent(taro, course, "helper")
     page = taro.get(f"/classes/{course}").text
-    assert 'aria-label="My agents"' in page and f'href="/agents/{agent}" class="my-agent' in page
-    assert 'aria-label="My agents"' not in hanako.get(f"/classes/{course}").text  # she has none
+    assert f'href="/classes/{course}/agents/{taro.id}" class="my-dashboard' in page  # above the Agents tab
+    assert page.index("my-dashboard") < page.index(f'?tab=agents" aria-selected')
+    assert 'aria-label="My agents"' not in page
+    assert "my-dashboard" in taro.get(f"/classes/{course}/tab/exams").text  # still there after switching tabs
+    assert "my-dashboard" not in admin.get(f"/classes/{course}").text  # only students in the class have one
+
     assert 'aria-label="Breadcrumb"' in page
+
+
+def test_students_are_stacked_gen_sections_not_a_draggable_window(admin, create_class):
+    course = create_class()
+    for tab in ("assignments", "agents"):
+        page = admin.get(f"/classes/{course}", params={"tab": tab}).text
+        assert "data-plane" not in page and "Re-centre" not in page

@@ -387,10 +387,14 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
         raise not_found()
     context = {"course": course, "tab": tab, "tabs": course_tabs(course), "can_manage": can_manage_classes(viewer),
                "can_submit": can_submit(db, viewer, course), "poll_seconds": POLL_SECONDS}
-    if tab == "agents":
-        if viewer.is_member:  # the Agent Skills market, under the student window
+    # A student in this class gets "My dashboard" above the Agents tab.
+    context["my_dashboard"] = context["can_submit"] and "agents" in context["tabs"]
+    if tab == "skills":  # the Agent Skills market (members only)
+        if viewer.is_member:
             context |= {"skill_categories": market.categories(db), "skill_sorts": market.SORTS,
                         "organizer_status": market.schedule_message(db), "open_skill": open_skill}
+        return context
+    if tab == "agents":
         return context | agents_window(db, viewer, course)
     kind = kind_of(tab, course)
     return context | {"kind": kind} | coursework_window(db, viewer, course, kind)
@@ -404,11 +408,7 @@ def class_page(request: Request, course_id: int, tab: str | None = None, skill: 
     # A class opens on its Agents tab if it has one, else on Assignments.
     default = "agents" if "agents" in course_tabs(course) else "assignments"
     tab = tab if tab in course_tabs(course) else default
-    mine = list(db.exec(select(Agent).where(Agent.course_id == course.id, Agent.owner_id == viewer.id)
-                        .order_by(func.lower(Agent.name))).all()) if viewer.is_member and viewer.id else []
-    my_states = states_for(db, mine)
     return render(request, db, viewer, "class.html", summary=enrolment_summary(db, course),
-                  my_agents=[(agent, my_states[agent.id]) for agent in mine],
                   ended=month_number(course.end_month) < month_number(today_jst()),
                   **tab_context(db, viewer, course, tab, open_skill=skill))
 

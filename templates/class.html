@@ -45,20 +45,6 @@
       {% endif %}
     </div>
     <p class="max-w-prose whitespace-pre-line break-words">{{ mask(course.description) }}</p>
-    {# "My agents": the viewer's own agents in this class, one click away. #}
-    {% if my_agents %}
-    {% import "partials/agent_state.html" as states %}
-    <div class="flex flex-wrap items-center gap-2" aria-label="My agents">
-      <span class="text-sm font-semibold">My agents</span>
-      {% for a, st in my_agents %}
-      <a href="/agents/{{ a.id }}" class="my-agent lift" title="{{ a.name }}: {{ st.label }}">
-        {{ states.pill(st, size="badge-xs", detail=True) }}
-        <span class="truncate font-semibold {{ states.name_colour(st) }}">{{ a.name }}</span>
-      </a>
-      {% endfor %}
-      <a href="/classes/{{ course.id }}/agents/{{ viewer.id }}" class="link text-sm">My dashboard &rarr;</a>
-    </div>
-    {% endif %}
   </header>
 
   {% include "partials/tab.html" %}

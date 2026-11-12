@@ -7,9 +7,11 @@
 <span class="lf-head">
   <a href="/agents/{{ agent.id }}" class="lf-avatar {{ states.name_colour(state) if state }}" title="Open {{ agent.name }}">
     <span data-marquee class="marquee min-w-0 flex-1"><span>{{ agent.name }}</span></span>
-    <span class="lf-person" title="{{ who(owner) if owner else '' }}" aria-hidden="true">{{ icon.person() }}</span>
+    <span class="lf-person" title="{{ ('you' if owner.id == viewer.id else who(owner)) if owner else '' }}" aria-hidden="true">{{ icon.person() }}</span>
   </a>
-  {% if owner %}<span class="lf-by" title="{{ who(owner) }}">by: {{ who(owner) }}</span>{% endif %}
+  {# The viewer's own agents say "by: you" (in bold) instead of their name. #}
+  {% if owner and owner.id == viewer.id %}<span class="lf-by">by: <strong class="text-base-content">you</strong></span>
+  {% elif owner %}<span class="lf-by" title="{{ who(owner) }}">by: {{ who(owner) }}</span>{% endif %}
 </span>
 {%- endmacro %}
 <div class="space-y-6">

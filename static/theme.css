@@ -445,35 +445,12 @@ fieldset:disabled .dropzone {
 
 /* --- The student window --------------------------------------------------------- */
 
-/* The window is a fixed-size viewport onto a 2D plane: the cells sit in the
-   middle of the plane, with empty "leeway" around them on every side that
-   isn't visible at first but can be moved to (drag, scroll wheel, scroll bars
-   or fingers). A faint dot grid moves with the plane, so moving is visible
-   even over empty space. static/ui.js shows the cells when the window opens. */
-.sw-frame {
-  position: relative;
-  overflow: auto;
-  height: 60vh;
-  min-height: 20rem;
-  border: 1.5px solid var(--ink);
-  background: rgb(215 229 248 / 0.25);
-}
-.sw-canvas {
-  width: max-content;
-  min-width: 100%;
-  /* The leeway: nearly a whole window's width and height on each side, so the
-     cells can be moved almost to any edge. (A percentage padding is measured
-     against the window's width; the height uses the window's 60vh.) */
-  padding: max(8rem, calc(60vh - 6rem)) max(8rem, calc(100% - 6rem));
-  background-image: radial-gradient(rgb(11 31 58 / 0.18) 1px, transparent 1.2px);
-  background-size: 24px 24px;
-}
-.sw-content {
+/* One section per gen, stacked; the page scrolls (no dragging around). */
+.sw-sections {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 2rem;
-  width: max-content;
+  padding-top: 0.75rem;
 }
 /* A gen's group: a lightly tinted, see-through frame with a dashed navy border. */
 .gen-frame {
@@ -494,12 +471,11 @@ fieldset:disabled .dropzone {
 }
 .gen-cells {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
   gap: 0.85rem;
 }
-/* Cells keep a fixed, readable size: more students make the window bigger,
-   never the cells smaller. */
+/* Cells keep a readable size: as many per row as fit, the rest wrap. */
 .student-cell {
-  width: 15rem;
   height: 7.5rem;
   overflow: hidden;
   display: flex;
@@ -940,17 +916,21 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   .marquee.is-overflowing > span, .card-warn { animation: none; }
 }
 
-/* "My agents" on the class page: one small card per agent of the viewer's. */
-.my-agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 16rem;
-  padding: 0.2rem 0.6rem 0.2rem 0.3rem;
-  border: 1px solid var(--ink);
-  border-radius: 999px;
-  background: #ffffff;
-  font-size: 0.8125rem;
+/* The class's tabs, joined into one bar (each in a slot, so a small "My
+   dashboard" link can sit above the Agents tab). */
+.class-tabs { display: flex; align-items: flex-end; }
+.tab-slot { position: relative; display: flex; flex-direction: column; align-items: center; }
+.tab-slot > .btn { border-radius: 0; }
+.tab-slot + .tab-slot > .btn { margin-left: -1px; }
+.tab-slot:first-child > .btn { border-radius: var(--radius-field, 0.25rem) 0 0 var(--radius-field, 0.25rem); }
+.tab-slot:last-child > .btn { border-radius: 0 var(--radius-field, 0.25rem) var(--radius-field, 0.25rem) 0; }
+.tab-slot:only-child > .btn { border-radius: var(--radius-field, 0.25rem); }
+.my-dashboard {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: 0.2rem;
+  white-space: nowrap;
+  font-size: 0.75rem;
 }
 
 /* The live feed (partials/live_feed.html, live_feed_body.html). Colours

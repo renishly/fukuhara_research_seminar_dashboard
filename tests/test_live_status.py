@@ -167,6 +167,8 @@ def test_bubbles_list_the_latest_agents_per_kind_joining_repeats(engine, client,
     assert paused.count("<span>park</span>") == 1 and "&times;3" in paused  # one line, joined
     assert 'class="lf-person" title="Yamada Taro"' in paused  # whose agent it is: the person marker
     assert ">by: Yamada Taro<" in paused  # and in words beside the box
+    own = taro.get(f"/classes/{course}/feed").text  # the owner sees "by: you" for their own agent
+    assert 'by: <strong class="text-base-content">you</strong>' in own and "by: Yamada Taro" not in own
     assert f'href="/agents/{agent}" class="lf-link' in paused  # the name in the text links to the agent
     assert f'<a href="/agents/{agent}" class="lf-avatar' in paused  # and so does its name box
     data = body[body.index("lf-bubble-data"):]

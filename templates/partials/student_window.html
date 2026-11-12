@@ -1,15 +1,13 @@
-{# The inside of the student window: one framed group per gen (newest first),
-   one fixed-size cell per enrolled student. The cells (.sw-content) sit in the
-   middle of a larger plane (.sw-canvas) with empty space ("leeway") on every
-   side, so the window can be moved around in two directions (x and y). #}
+{# The students: one framed section per gen (newest first), stacked so the
+   page scrolls down; in each, one cell per enrolled student, as many per row
+   as fit. #}
 {% import "partials/agent_state.html" as states %}
 {% if groups %}
-<div class="sw-canvas">
-<div class="sw-content">
+<div class="sw-sections">
   {% for group in groups %}
   <section class="gen-frame" aria-label="{{ gen_label(group.gen) }}">
     <span class="gen-label">{{ gen_label(group.gen) or "No gen" }}</span>
-    <div class="gen-cells" style="grid-template-columns: repeat({{ group.columns }}, 15rem)">
+    <div class="gen-cells">
       {% for cell in group.cells %}
       {% set student = cell.student %}
       {% set url = "/classes/%d/agents/%d" % (course.id, student.id) if tab == "agents"
@@ -39,7 +37,6 @@
     </div>
   </section>
   {% endfor %}
-</div>
 </div>
 {% else %}
 <p class="p-6 text-center text-base-content/70">Nobody is enrolled in this class yet.</p>

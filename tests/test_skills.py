@@ -49,14 +49,16 @@ def market_html(person, course, **params):
 def test_a_member_shares_a_skill_and_it_appears_with_its_identifier(engine, taro, course):
     response = share(taro, course, summary="Finds papers")
     skill = skills(engine)[0]
-    assert response.headers["HX-Redirect"] == f"/classes/{course}?tab=agents&skill={skill.id}"
+    assert response.headers["HX-Redirect"] == f"/classes/{course}?tab=skills&skill={skill.id}"
     assert skill.name == "Paper finder"  # from the file's first heading
     listing = market_html(taro, course)
-    assert "Paper finder" in listing and f"skill-{skill.id}" in listing and "Yamada Taro" in listing
+    assert "Paper finder" in listing and f"skill-{skill.id}" in listing and "Finds papers" in listing
+    assert "Yamada Taro" not in listing  # cards stay short: the author is in the pop-up
     detail = taro.get(f"/skills/{skill.id}").text
+    assert "Yamada Taro" in detail
     assert f'read_skill("skill-{skill.id}")' in detail and f"/api/skills/{skill.id}/content" in detail
     assert "Search arXiv" in detail
-    assert "Agent skills" in taro.get(f"/classes/{course}?tab=agents").text
+    assert "Agent skills" in taro.get(f"/classes/{course}?tab=skills").text
 
 
 def test_sharing_again_with_the_same_name_updates_it(engine, taro, course):

@@ -65,12 +65,13 @@ def course_name(course: Course) -> str:
 
 
 def course_tabs(course: Course) -> list[str]:
-    """The class page's tabs: Assignments always; Exams and Agents if switched on."""
+    """The class page's tabs: Assignments always; Exams and Agents if switched
+    on; with Agents, also Agent skills (the skills market)."""
     tabs = ["assignments"]
     if course.has_exams:
         tabs.append("exams")
     if course.has_agents:
-        tabs.append("agents")
+        tabs += ["agents", "skills"]
     return tabs
 
 
