@@ -420,7 +420,8 @@ def skill_info(db: Session, skill: Skill, site: str = "", with_content: bool = F
         "summary": skill.summary, "credit": credit(skill, owner),
         "owner": owner.full_name if owner else None, "agent": skill.agent_name, "agent_id": skill.agent_id,
         "class": course_name(course) if course else None, "share": skill.share,
-        "category": category.name if category else None, "specialty": skill.specialty,
+        "category": category.name if category else None, "category_number": category.position if category else None,
+        "scope": skill.scope, "planned": skill.planned, "votes": skill_votes(db, skill.id), "specialty": skill.specialty,
         "version": skill.version, "downloads": skill.downloads,
         "created_at": as_utc(skill.created_at).isoformat(), "updated_at": as_utc(skill.updated_at).isoformat(),
         "skill_tree": f"{site}/api/skill-trees/{skill.agent_id}" if skill.agent_id else None,
@@ -570,6 +571,11 @@ def fixed_categories(db: Session) -> dict[int, SkillCategory]:
             db.delete(old)
     db.flush()
     return rows
+
+
+def skill_votes(db: Session, skill_id: int) -> int:
+    """A skill's vote total (ups minus downs)."""
+    return int(db.exec(select(func.coalesce(func.sum(SkillVote.value), 0)).where(SkillVote.skill_id == skill_id)).one())
 
 
 def forget_votes(db: Session, skill_ids) -> None:

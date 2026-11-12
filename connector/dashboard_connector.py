@@ -118,7 +118,20 @@ FUNCTIONS
                              The same, by hand: list, download, confirm.
 
   The Agent Skills market (skill files shared by students and their agents):
-  post_skill(content, name=None, summary=None, share="class")
+  send_forecast(target, value, unit=None, market=None, view=None, why_changed=None,
+                evidence=None, week=None)
+                             The weekly forecast, in the seminar's standard shape
+                             (the class's Forecasts tab compares it with last week's).
+  set_run_status(last_status, steps=None, last_run=None)
+                             The "Run status" monitor: "failed" or a failing / silent
+                             step shows the agent as "Needs attention".
+  step(name, state="ok", last_run=None, last_new_data=None, note=None)
+                             One step for set_run_status().
+  debate(content, category="Debate")
+                             A result of the agents' debate (the agent's Debate tab).
+  my_state()                 This agent's state on the dashboard: "live", "attention",
+                             "offline" or "paused", why, and its rhythm tag.
+  post_skill(content, name=None, summary=None, share="class", category=None, scope=None)
                              Share a skill file (text or a Path), credited to this
                              agent and its owner. Posting the same name again updates
                              it (same identifier, next version). share: "class" or
@@ -176,21 +189,39 @@ CHECK-INS
   as being seen.
 
 WEEKLY FORECAST (the seminar's standard, so forecasts can be compared)
-  Send it as an output in the category "Forecast", once a week:
-      output({"target": "Mitsui Fudosan (8801)", "value": 1205, "unit": "JPY",
-              "market": 1470, "view": "Underweight",
-              "why_changed": "Cost of equity rose to 12% (Fama-French)",
-              "evidence": [{"title": "Peer multiples", "url": "https://..."}]},
-             "Forecast")
-  Only "target" and "value" are needed; "week" (e.g. "2026-W46") defaults to
-  the week it's sent. It shows in the class's Forecasts tab (this week vs last)
-  and in the agent's Forecast tab. Debates: outputs whose category contains
-  "debate" show in the agent's Debate tab.
+  Once a week:
+      send_forecast("Mitsui Fudosan (8801)", 1205, unit="JPY", market=1470,
+                    view="Underweight", why_changed="Cost of equity rose to 12%",
+                    evidence=[("Peer multiples", "https://...")])
+  Only target and value are needed; week ("2026-W46") defaults to the week it's
+  sent (the newest forecast in a week counts). It shows in the class's
+  Forecasts tab (this week vs last) and in the agent's Forecast tab. It's an
+  output in the category "Forecast", so output(dict, "Forecast") works too.
+  Debates: debate(text) (any output whose category contains "debate") shows in
+  the agent's Debate tab.
 
 RUN STATUS (optional, for "Needs attention")
-  Keep a monitor named exactly "Run status" with {"last_run", "last_status"
-  (failed | not_due | no_new_data | new_data), "steps": [{"name", "state"
-  (ok | failing | silent), "last_run", "last_new_data", "note"}]}.
+  At the end of each run:
+      set_run_status("new_data", steps=[
+          step("parking panel", "ok", last_new_data=now),
+          step("competitor prices", "failing", note="HTTP 503 from source")])
+  last_status: failed | not_due | no_new_data | new_data. A step's state: ok |
+  failing | silent (no new data for longer than usual). A failed run, or a
+  failing or silent step, shows the agent as "Needs attention" with the reason;
+  the agent page lists the steps. It's the monitor named exactly "Run status".
+
+SKILLS AND THE SKILL MAP
+  post_skill(text, category=6, scope="common") chooses the skill's class
+  category (0 Shared foundation, 1 Public data collection, 2 Alternative &
+  field data, 3 Data checks & statistics, 4 Market, competitor & 3C/4P,
+  5 Revenue & earnings forecast, 6 Valuation, 7 Debate & judge, 8 Position &
+  portfolio, 9 Operations & publishing; or its key, e.g. "valuation") and
+  whether others could reuse it ("common") or not ("personal"). Without a
+  category, the dashboard files it by its rules ("category:" in the skill's
+  frontmatter also works). Write "depends_on: [other-skill]" in a skill's
+  frontmatter, or name the skill it reads first, to order it on the skill map.
+  skills() and read_skill() also give each skill's category_number, scope,
+  planned and votes.
 
 START AND PAUSE (the dashboard's buttons)
   They reach the agent at its next check-in. While paused, output() and
@@ -1264,13 +1295,17 @@ def _skill_path(ref) -> str:
     return "/api/skills/" + quote(str(ref), safe="")
 
 
-def post_skill(content, name: str | None = None, summary: str | None = None, share: str = "class") -> dict | None:
+def post_skill(content, name: str | None = None, summary: str | None = None, share: str = "class",
+               category: int | str | None = None, scope: str | None = None) -> dict | None:
     """Share a skill file on the market, credited to this agent and its owner.
 
-    content: the skill's text, or a file (a pathlib.Path or an open file), up to 100 KB.
-    name:    default: the file's first heading. Posting again with the same name
-             updates the skill: same identifier, next version.
-    share:   "class" (this agent's class only) or "seminar" (every class's market).
+    content:  the skill's text, or a file (a pathlib.Path or an open file), up to 100 KB.
+    name:     default: the file's first heading. Posting again with the same name
+              updates the skill: same identifier, next version.
+    share:    "class" (this agent's class only) or "seminar" (every class's market).
+    category: the class category, 0-9 or its key (e.g. 6 or "valuation"); kept as
+              chosen. Default: the dashboard files it by its rules.
+    scope:    "common" (others could reuse it) or "personal".
     Returns the skill's details (with its "identifier" and "address"), or None.
     """
     if PROBLEM:
@@ -1278,12 +1313,114 @@ def post_skill(content, name: str | None = None, summary: str | None = None, sha
     text = _skill_text(content)
     if text is None:
         return None
+    body = {"content": text, "name": name, "summary": summary, "share": share}
+    if category is not None:
+        body["category"] = category
+    if scope is not None:
+        body["scope"] = scope
     try:
-        return _send("POST", "/api/skills", UPLOAD_TIMEOUT_SECONDS,
-                     json={"content": text, "name": name, "summary": summary, "share": share}).json()
+        return _send("POST", "/api/skills", UPLOAD_TIMEOUT_SECONDS, json=body).json()
     except (requests.RequestException, ValueError) as error:
         _warn("share the skill", error)
         return None
+
+
+# --- The seminar's standard outputs ------------------------------------------------------------------
+
+RUN_RESULTS = ("failed", "not_due", "no_new_data", "new_data")
+STEP_STATES = ("ok", "failing", "silent")
+
+
+def _iso(moment) -> str | None:
+    """A datetime (or an ISO text) as ISO 8601 text; None stays None."""
+    if moment is None:
+        return None
+    if isinstance(moment, datetime):
+        return (moment if moment.tzinfo else moment.astimezone()).isoformat()
+    return str(moment)
+
+
+def send_forecast(target: str, value: float, unit: str | None = None, market: float | None = None,
+                  view: str | None = None, why_changed: str | None = None, evidence=None,
+                  week: str | None = None) -> bool:
+    """This week's forecast, in the seminar's standard shape (an output in the
+    category "Forecast"). The class's Forecasts tab compares it with last week's.
+
+    target:      what you forecast, e.g. "Mitsui Fudosan (8801)".
+    value:       the forecast, e.g. a fair value per share (a number).
+    unit:        e.g. "JPY". market: today's market price, for comparison.
+    view:        e.g. "Overweight", "Neutral", "Underweight".
+    why_changed: why it differs from last week's.
+    evidence:    sources: [("title", "https://...")] or [{"title", "url"}] or ["https://..."].
+    week:        an ISO week like "2026-W46" (default: the week it's sent).
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        print(f"[dashboard] Not sent: the forecast value {value!r} isn't a number.")
+        return False
+    items = []
+    for item in evidence or []:
+        if isinstance(item, dict):
+            items.append({"title": item.get("title") or item.get("url"), "url": item.get("url")})
+        elif isinstance(item, (tuple, list)) and len(item) == 2:
+            items.append({"title": item[0], "url": item[1]})
+        else:
+            items.append({"title": str(item), "url": str(item)})
+    forecast = {"target": target, "value": number}
+    for key, given in (("unit", unit), ("market", market), ("view", view), ("why_changed", why_changed),
+                       ("week", week)):
+        if given is not None:
+            forecast[key] = given
+    if items:
+        forecast["evidence"] = items
+    return output(forecast, "Forecast")
+
+
+def step(name: str, state: str = "ok", last_run=None, last_new_data=None, note: str | None = None) -> dict:
+    """One step of a run, for set_run_status(). state: "ok", "failing" or
+    "silent" (no new data for longer than usual). Times: datetimes or ISO text."""
+    if state not in STEP_STATES:
+        print(f"[dashboard] A step's state must be one of {', '.join(STEP_STATES)}; using \"ok\" for {name!r}.")
+        state = "ok"
+    return {"name": name, "state": state, "last_run": _iso(last_run), "last_new_data": _iso(last_new_data),
+            "note": note}
+
+
+def set_run_status(last_status: str, steps=None, last_run=None) -> bool:
+    """How the latest run went (the monitor named "Run status"). A "failed" run,
+    or a failing or silent step, shows this agent as "Needs attention" with the
+    reason; the agent's page lists the steps.
+
+    last_status: "failed", "not_due", "no_new_data" or "new_data" (new data
+                 also shows in the class's live feed).
+    steps:       [step("prices", "ok"), step("news", "failing", note="HTTP 503")].
+    last_run:    when the run happened (default: now).
+    """
+    if last_status not in RUN_RESULTS:
+        print(f"[dashboard] Not sent: last_status must be one of {', '.join(RUN_RESULTS)}.")
+        return False
+    status = {"last_run": _iso(last_run) or _now(), "last_status": last_status,
+              "steps": [s if isinstance(s, dict) else step(str(s)) for s in (steps or [])]}
+    return set_monitor(status, "Run status")
+
+
+def debate(content, category: str = "Debate") -> bool:
+    """A result of the agents' debate (e.g. each side's view and the verdict).
+    It shows in the agent's Debate tab (any category containing "debate")."""
+    if "debate" not in category.lower():
+        category = f"{category} debate"
+    return output(content, category)
+
+
+def my_state() -> dict | None:
+    """This agent's state on the dashboard: {"state": "live" | "attention" |
+    "offline" | "paused", "why": ..., "rhythm": "Daily" ..., "check_in_every": seconds}."""
+    info = read_agent("me")
+    if not info:
+        return None
+    return {"state": info.get("state"), "why": info.get("state_why"), "rhythm": info.get("rhythm"),
+            "check_in_every": info.get("check_in_every")}
 
 
 def skills(scope: str = "class", query: str | None = None, category: str | None = None,

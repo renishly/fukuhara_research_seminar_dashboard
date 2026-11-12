@@ -899,3 +899,31 @@ def test_agent_page_has_tabs_and_debate_only_when_it_debates(client, taro, hanak
     client.post("/api/outputs", json={"category": "Agent debate", "content": "Bull 0.6 vs Bear 0.4"}, headers=api("helper"))
     page = hanako.get(f"/agents/{agent}").text
     assert "Debate</button>" in page and "Bull 0.6 vs Bear 0.4" in page
+
+
+def test_connector_sends_forecasts_run_status_debates_and_categorised_skills(engine, taro, connector):
+    from db import Skill, SkillCategory
+    from forecasts import weekly
+    agent_id = rows(engine, Agent)[0].id
+    connector.check_in(every=86400)
+    assert connector.send_forecast("Mitsui Fudosan (8801)", 1205, unit="JPY", market=1470, view="Underweight",
+                                   why_changed="Cost of equity rose", evidence=[("Peers", "https://example.com/p")],
+                                   week="2026-W46")
+    assert connector.send_forecast("x", "not a number") is False  # refused before sending
+    with Session(engine) as db:
+        forecast = weekly(db, [agent_id])[agent_id][0]
+    assert (forecast.target, forecast.value, forecast.view) == ("Mitsui Fudosan (8801)", 1205.0, "Underweight")
+    assert forecast.evidence == [("Peers", "https://example.com/p")]
+    assert connector.set_run_status("new_data", steps=[connector.step("prices", "ok"),
+                                                       connector.step("news", "failing", note="HTTP 503")])
+    assert connector.set_run_status("broken") is False
+    state = connector.my_state()
+    assert state["state"] == "attention" and state["why"] == "news failing: HTTP 503" and state["rhythm"] == "Daily"
+    assert connector.debate("Bull 0.6 vs Bear 0.4")
+    assert any(o.category == "Debate" for o in rows(engine, Output))
+    info = connector.post_skill("# dcf-value\n\nValue per share.", category="valuation", scope="common")
+    assert info["category_number"] == 6 and info["scope"] == "common" and info["votes"] == 0
+    with Session(engine) as db:
+        skill = db.exec(select(Skill).where(Skill.name == "dcf-value")).one()
+        assert db.get(SkillCategory, skill.category_id).name == "Valuation" and skill.category_source == "owner"
+    assert connector.post_skill("# other\n\nx", category="nonsense") is None  # refused: unknown category

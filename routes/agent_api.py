@@ -430,7 +430,7 @@ def agent_info(db: Session, agent: Agent, caller: Agent) -> dict:
         "owner": {"full_name": owner.full_name if owner else None, "gen": gen.number if gen else None},
         "folders": [folder.name for folder in folders_of(db, agent.id)],
         "online": is_online(agent), "paused": agent.paused, "accepts_messages": agent.accepts_messages,
-        "state": state.key, "rhythm": state.rhythm,
+        "state": state.key, "state_why": state.why, "rhythm": state.rhythm,
         "check_in_every": check_in_interval(agent), "created_at": iso(agent.created_at),
         "last_seen": iso(agent.last_seen_at),
         "monitors": [m.name for m in db.exec(select(Monitor).where(Monitor.agent_id == agent.id)

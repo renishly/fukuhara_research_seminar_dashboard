@@ -50,13 +50,20 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | `storage.py` | Saves, streams and deletes files: Supabase Storage or a local folder |
 | `uploads.py` | Upload limits, file records, and sending files safely |
 | `usage.py` | What takes up file storage and database space, with the Members page's pie charts |
-| `market.py` | The Agent Skills market: who sees which skills, identifiers, and the organizer |
+| `market.py` | The Agent Skills market: who sees which skills, identifiers, the fixed categories and the organizer |
+| `skill_sorter.py` | Raiyaan's skill sorter (unchanged): the class's 9 categories, keyword rules, zip checks |
+| `skillmap.py` | The skill map: per-student counts, and the graph's layout (nodes, inner connections, paths) |
+| `checkins.py` | Each agent's check-in history (merged into spans) and the Check-in activity graph |
+| `run_status.py` | Reads an agent's "Run status" monitor (failed runs, failing or silent steps) |
+| `forecasts.py` | Reads agents' weekly "Forecast" outputs; this week vs last |
+| `progress.py` | Who has handed in what: the submission overview and the to-do list |
+| `assistant.py` | The seminar chat: what it may read, picking sources, the shared daily AI budget |
 | `timeline.py` | Pure Python: lays class boxes out in lanes on the timeline |
 | `web.py` | Templates, times in JST, small reply helpers |
 | `routes/` | The pages and the API (see the diagram) |
 | `templates/` | The HTML pages; `templates/partials/` are pieces HTMX refreshes or opens |
-| `static/` | `tailwind.css` (built), `theme.css` (the "bluepaper" look), `ui.js` (drag-to-pan, centring, the grid, drop zones) |
-| `connector/` | The downloadable Python connector, and a prompt for building one in any language |
+| `static/` | `tailwind.css` (built), `theme.css` (the "bluepaper" look), `ui.js` (drag-to-pan, drop zones, sliding names, countdowns, the skill map's dragging and path drawing) |
+| `connector/` | The downloadable Python connector, a prompt for building one in any language, and the skill sorter's rulebook and SKILL.md template |
 | `agent/agent.py` | A demo agent built on the connector |
 | `tests/` | Automated tests (`pytest`), and `TEST_REPORT.md` |
 
@@ -74,6 +81,9 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | See submissions and their files | ✓ | ✓ | Only ones ticked "Visible to guests" |
 | Add and control agents | | When enrolled; only their own | |
 | See other students' agent pages | ✓ (read-only) | ✓ (read-only) | Only the grid: names, status, descriptions |
+| Live feed, Forecasts, Agent skills, Documents tabs | ✓ | ✓ | Agents tab shows a summary line only |
+| Chat and OB/OG pages | ✓ | ✓ | |
+| Add OB/OG entries (with their consent) | ✓ | ✓ (edit/remove: their own entries; admins: all) | |
 | Members page (accounts, gens, storage) | ✓ | | |
 | Real names of students | ✓ | ✓ | Never: "Gen 9 Student 7" instead |
 
@@ -204,11 +214,46 @@ $env:DASHBOARD_API_KEY="paste-the-key-here"; python agent\agent.py
 
 (Or put `DASHBOARD_API_KEY=...` in your `.env` file.) Its card turns **online**, it reports "Agent online", sends a "ticks" output every 20 seconds, and replies to **Start**, **Pause** and messages. Its `handle()` function is where a real agent's AI logic goes. Set `DASHBOARD_URL` to talk to a deployed site instead of `http://127.0.0.1:8000`.
 
+### Agent states and check-ins
+
+Every agent has one state, shown as a coloured pill with its name (checked in this order):
+
+| State | When |
+|---|---|
+| **Paused** | The owner pressed Pause |
+| **Offline** | Never connected, or no check-in for 1.5× its interval (at least 30 s late) |
+| **Needs attention** | No interval set, or its **Run status** monitor reports a failed run or a failing / silent step |
+| **Live** | Everything else |
+
+- **Interval.** An agent says how often it checks in (`check_in(every=3600)`, 1 s to 35 days); its owner can also set it on the agent page (Agent settings), which wins, with a warning if the two differ. Each interval gets a tag: **Real-time** (under 15 min), **Hourly**, **Daily**, **Weekly** (3-14 days), **Monthly**. With no interval the agent shows *Needs attention*.
+- **Run status** (optional): a monitor named exactly `Run status` holding `{"last_run", "last_status": "failed" | "not_due" | "no_new_data" | "new_data", "steps": [{"name", "state": "ok" | "failing" | "silent", "last_run", "last_new_data", "note"}]}`. The agent page shows the steps (Overview tab).
+- **Check-in activity** (agent page): a bar per check-in over the last 12 intervals, as tall as the silence before it; green on time, orange late, a red ✕ for a missed one. The history is kept compactly (`CheckInSpan`) and only for 13 intervals.
+- **Cards** show the state, "checked in 12 min ago", why if not live, the rhythm tag, and **This week** (offline / attention / new data / new outputs in the last 7 days). Offline cards are shaded with a warning.
+- **The live feed** (class Agents tab, members): daily bars of how many agents were due each day by their worst state (click a slice for those agents), then chips for Live / Needs attention / Offline / Paused / New data with chat-style bubbles of the latest activity. Changes are dated when they happened (`StateChange`), and a run that's due shows "typing" until it lands.
+
+### The seminar's standard outputs
+
+- **Weekly forecast** (Jimin): an output in the category `Forecast`: `{"target", "value", "unit", "market", "view", "why_changed", "evidence": [{"title", "url"}]}` (`target` and `value` required; `week` like `"2026-W46"` defaults to the week it's sent). The class's **Forecasts** tab lists every member with this week vs last; an agent's **Forecast** tab shows the weeks side by side with why it changed and the evidence.
+- **Debates**: outputs whose category contains "debate" appear in the agent's **Debate** tab.
+
+---
+
+## Coursework: to-do list and submission overview
+
+On the Assignments and Exams tabs, students in the class get a **To do** list (overdue, due soon, upcoming, done) with **Submit here**, and every member sees the **Submission overview**: each student × each assignment, on time / late / missing / not due, late and missing in red. A submission counts once it's **linked to the assignment** on the submit form ("Submit here" does that).
+
+## Documents, OB/OG and Chat
+
+- **Documents.** An admin can paste a shared **Google Drive folder** link into a class's settings; members then get a **Documents** tab showing it (files stay in Drive).
+- **OB/OG** (top bar, members): graduates who agreed to be listed, with contacts; **Log visit request** records who asked whom (and warns if someone did in the last 30 days). Any member adds entries with the consent box ticked; the adder or an admin edits or removes them.
+- **Chat** (top bar, members): ask about anything members can see (classes, assignments, submissions, agents, forecasts, skills, OB/OG); answers cite their sources with buttons to open them. It never sends passwords, login IDs, keys or alumni contact details to the AI.
+- **The AI budget.** OpenRouter's daily allowance is shared by the whole seminar: `OPENROUTER_DAILY_REQUESTS` (default 50). The skill organizer's runs are kept free; chat uses the rest, with 20 questions per member a day. The Chat page shows what's used, kept and left. Without a key or budget, the chat answers with the matching items.
+
 ---
 
 ## The Agent Skills market
 
-Below the Agents tab's student window, members (never guests) share **skill files**: Markdown instructions that make an agent able to do something. Students upload them directly, and agents post them through the connector (`post_skill(...)`); either way a skill is credited to the student, and also to the agent if an agent posted it ("from Yamada Taro's agent, Researcher").
+The **Agent skills** tab (members only; a blue "!" while you have new or updated skills to check) opens on the **Skill map**, with the **Market** beside it. Members share **skill files**: Markdown instructions that make an agent able to do something. Students upload them directly, and agents post them through the connector (`post_skill(...)`); either way a skill is credited to the student, and also to the agent if an agent posted it ("from Yamada Taro's agent, Researcher").
 
 - **Identifiers.** Every skill has an identifier like `skill-12` and an address like `https://your-site/api/skills/12/content`. Give either to an agent: `read_skill("skill-12")` always returns the **latest** version, so an agent can use a shared skill in its normal loop without keeping a copy that goes out of date. Posting a skill again with the same name updates it (same identifier, next version).
 - **Class or seminar.** Each skill is shared with *this class only* or the *whole seminar*. The market opens on the current class (its own skills, including the ones it shared with everyone); **Whole seminar** adds skills shared from every class.
@@ -216,11 +261,20 @@ Below the Agents tab's student window, members (never guests) share **skill file
   - the **AI version** (Markdown, required): what the organizer and agents read. Upload it with **+ Skill tree**, or from an agent with `set_skill_tree(...)`;
   - an optional **user-friendly version** for people: a PDF, HTML page or image (up to 20 MB), added with the AI version or later (**+ Skill tree** again, or `set_skill_tree_view("tree.pdf")`). Members see it first, with the AI version behind **Show the AI version (.md)**. HTML is shown sealed off, without scripts.
 - **The built-in connector skill.** "Dashboard connector" (`skill-connector`) comes with the dashboard and is always on every class's market, at the top. It is the connector instructions ("Implement connector → Prompt"), rewritten at every start, so its version goes up whenever the dashboard's API changes. Give an agent `skill-connector` and tell it to re-read it when a dashboard call fails in a new way: it can then adapt its connection. Nobody (not even an admin) can edit or remove it, and the organizer leaves it alone.
-- **Filters**: search, category, shared by (members or agents), "Mine", and sort (by category, recently updated, most downloaded, name, newest).
+- **Filters**: search, category, shared by (members or agents), reuse (common / personal), "Mine", and sort.
+- **Categories.** Every skill is in one of the class's **9 categories + Shared foundation** (from the class skill tree, Oct 2026; `skill_sorter.py`). It's filed by the sorter's rules when shared; an owner can choose the category in the skill form, and that's never overridden.
+- **Common or personal** (Masuda): each skill is a *common candidate* (others could reuse it) or *personal*.
+- **Votes.** Members vote skills up or down (in the skill's pop-up); totals show on cards and size the skill's node on the map.
+- **New / updated.** Skills you haven't opened since they were posted or updated carry a blue "!" until you open them (or **Mark all as checked**).
+- **Skills zip** (Raiyaan): an agent's owner can upload its skills folder as one zip (Agent settings → Skills (.zip)): `skills/<skill-name>/SKILL.md`, each with `name:` and `description:` frontmatter (rulebook and template are downloadable there). The zip is checked (structure, no secrets; nothing is ever run), each skill gets a suggested category, and the owner confirms before anything is published.
+
+### The skill map
+
+A graph: the 10 **category nodes** on one path, left to right, each as big as its share of skills; inside, each member's **skill nodes** (colour: live / built / planned; size: votes) on **inner connections**, one per agent (its skills are used together, in the order they read each other); skills without a category sit outside, near the skills they work with. Each page load gets a new random layout. Drag nodes (they spring back if pulled far), hover for the name and creator, click to open, or **Draw a path** along the map's lines (left to right) and download those skills as a zip, one folder per category. **Compare** shows two students per category.
 
 ### The market organizer
 
-The organizer sorts skills into categories **by function** (data retrieval, decision frameworks, writing...), writes a description of what each category's skills do (shown above each group), and for each skill a note on what sets it apart from the others. It runs **every day at 15:00 JST**, plus once around 03:00 JST if skills changed: at most twice a day.
+The organizer files every skill into the fixed categories by the sorter's rules, and asks the AI (one request) only about the skills the rules weren't sure of, writing a short note on what sets each apart. It runs **every day at 15:00 JST**, plus once around 03:00 JST if skills changed: at most twice a day.
 
 - **With an OpenRouter key** (`OPENROUTER_API_KEY` on Render), an AI model does it in one request per run, using `OPENROUTER_MODEL` (default `openrouter/free`, which picks whichever free model is available). OpenRouter's free tier allows very few requests a day, so the site never makes more than two organizer requests a day, including admins' **Organize now** button.
 - **Without a key**, simple keyword rules sort the skills instead (that's what the local demo and the tests use).
@@ -252,7 +306,7 @@ Every upload field is a **drop zone**: drop files on it, or click it to choose t
 
 ## Previews of files
 
-PDFs, HTML pages and text files (Markdown, CSV, JSON...) have a **Preview** button wherever they're shown (assignments, submissions, agent outputs and monitors). PDFs open in the browser's own PDF viewer (only real PDFs). HTML and text are shown in a sealed-off frame: the browser treats them as coming from another site, and scripts can't run, so a file can't see anyone's sign-in or act on the site. Styles and pictures inside the file still display, but interactive pages (that need JavaScript) show only their static content.
+PDFs, HTML pages and text files have a **Preview** button wherever they're shown (assignments, submissions, agent outputs and monitors). PDFs open in the browser's own PDF viewer (only real PDFs). **CSV/TSV** show as a sortable table, **JSON** laid out with indents. **HTML** runs its own scripts in a sealed-off frame: the browser treats it as another site, so it can't see anyone's sign-in or act on the site, and it can't load or send anything over the internet (pages whose scripts come from a CDN won't work). Text files are shown without scripts. **Google Drive / Docs links** get a Preview with Google's own viewer.
 
 ## Running the tests
 
@@ -347,3 +401,5 @@ At every start, the site creates missing tables and **adds** columns that exist 
 - **Switch off `/docs` in production** (`FastAPI(docs_url=None, redoc_url=None)` in `main.py`), or only show it to admins.
 - **Discord notifications** for the notify bells on output categories (the settings are already saved in the `NotifySetting` table).
 - **Grading and feedback** on submissions.
+- **A Slack bot** (Yui) that brings the professor's "next week's assignment" messages onto the class page (needs a Slack app installed in the workspace).
+- **A meeting scheduler** (Kenichi), left out for now: free tools like When2meet do this.

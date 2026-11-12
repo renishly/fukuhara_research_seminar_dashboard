@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 import market
+import skill_sorter
 from db import Agent, Course, Skill, SkillTree, StoredFile, User, get_session
 from routes.agents import site_url
 from security import require_agent
@@ -95,6 +96,24 @@ class SkillIn(BaseModel):
     name: str | None = None  # default: the file's first heading
     summary: str | None = None
     share: str = "class"  # "class" or "seminar"
+    # Optional: the class category, as a number (0-9) or key ("valuation"); the agent's
+    # choice is kept like an owner's. And "personal" or "common" (a candidate others could reuse).
+    category: int | str | None = None
+    scope: str | None = None
+
+
+def category_number(raw: int | str | None) -> int | None:
+    """0-9 from a number, "6", a key ("valuation") or a name ("Valuation"); None if empty; 422 if unknown."""
+    if raw is None or raw == "":
+        return None
+    text = str(raw).strip().lower()
+    if text.isdigit() and int(text) in skill_sorter.CAT_BY_ID:
+        return int(text)
+    for number, name, _ in market.FIXED:
+        key = skill_sorter.CAT_BY_ID[number]["key"]
+        if text in (key, name.lower()):
+            return number
+    raise HTTPException(422, "category must be 0-9, a key like \"valuation\", or a category name")
 
 
 @router.post("/skills", status_code=201)
@@ -108,9 +127,19 @@ def post_skill(skill_in: SkillIn, request: Request, agent: Agent = Depends(requi
         raise HTTPException(422, str(refusal))
     if skill_in.share not in market.SHARES:
         raise HTTPException(422, 'share must be "class" or "seminar"')
+    if skill_in.scope is not None and skill_in.scope not in market.SCOPES:
+        raise HTTPException(422, 'scope must be "personal" or "common"')
+    number = category_number(skill_in.category)
     owner = db.get(User, agent.owner_id)
     skill, created = market.save_skill(db, course=db.get(Course, agent.course_id), owner=owner, content=content,
                                        name=skill_in.name, summary=skill_in.summary, share=skill_in.share, agent=agent)
+    if number is not None:
+        skill.category_id, skill.category_source = market.fixed_categories(db)[number].id, "owner"
+    if skill_in.scope is not None:
+        skill.scope = skill_in.scope
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
     info = market.skill_info(db, skill, site_url(request))
     info["created"] = created
     return info
