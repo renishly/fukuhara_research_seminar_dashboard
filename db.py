@@ -592,6 +592,30 @@ class OrganizerRun(SQLModel, table=True):
     finished_at: datetime | None = None
 
 
+class DataPointType(SQLModel, table=True):
+    """The type the AI model suggested for one data point name (see
+    datapoint_types.py). Names are kept in lower case; one row per name, shared
+    by every agent that uses it."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)  # e.g. "rohto share price"
+    suggested: str  # a datapoints.TYPES key, e.g. "market"
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class DataPointRun(SQLModel, table=True):
+    """One run of the data point sorter (datapoint_types.py), kept to stay
+    within its share of the daily OpenRouter requests."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    jst_date: str = Field(index=True)  # the day in Japan, e.g. "2026-11-13"
+    method: str  # "ai"
+    ok: bool = False
+    names: int = 0  # how many names were sent
+    message: str = ""
+    started_at: datetime = Field(default_factory=utc_now)
+
+
 class ExternalLink(SQLModel, table=True):
     """A place outside the dashboard where a student's work lives (their own
     site, a Claude artifact, a repo...), on their agent dashboard in one class,

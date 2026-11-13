@@ -5,8 +5,10 @@ import pytest
 from sqlmodel import Session
 
 from conftest import api
+from datetime import timedelta
+
 from datapoints import breakdowns, parse
-from db import Agent
+from db import Agent, utc_now
 
 
 @pytest.fixture
@@ -33,7 +35,7 @@ def counts(engine, agent_id):
 def test_parse_maps_types_and_ignores_junk():
     d = parse('{"data_points": {"Market prices": ["A", "a ", "B"], "internal_values": 2, "Weather": ["x"],'
               ' "Company data": "three"}, "debates": 2, "uses": ["Helper", true]}')
-    assert d.names == {"market": {"a", "b"}, "other": {"x"}} and d.counts == {"internal": 2}
+    assert d.names == {"market": {"a", "b"}} and d.untyped == {"x"} and d.counts == {"internal": 2}  # "Weather": sorted
     assert d.debates == 2 and d.uses == ["Helper"]
     assert parse("[1, 2]") is None and parse("{}") is None and parse("not json") is None
 
@@ -89,7 +91,66 @@ def test_connector_sends_decisions_and_data_points(monkeypatch):
     assert not connector.send_forecast("Mitsui", None)
     assert connector.set_data_points({"Market prices": ("A", "B"), "Company data": 3, "Bad": "x"}, debates=1,
                                      uses=["News Scout"])
+    assert connector.set_data_points(["Rohto price", "BOJ Tankan"])
     assert sent == [("Forecast", {"target": "Will SpaceX top $3T by 31 Dec?", "value": "NO"}),
                     ("Forecast", {"target": "Mitsui", "value": 1205, "unit": "JPY"}),
                     ("Data points", {"data_points": {"Market prices": ["A", "B"], "Company data": 3}, "debates": 1,
-                                     "uses": ["News Scout"]})]
+                                     "uses": ["News Scout"]}),
+                    ("Data points", {"data_points": ["Rohto price", "BOJ Tankan"], "debates": 0})]
+
+
+def test_names_without_a_type_are_sorted_by_rules_then_by_the_ai_within_its_budget(engine, client, taro, course,
+                                                                                   create_agent, monkeypatch):
+    import datapoint_types as sorter
+    import market
+    from db import DataPointRun
+    agent = create_agent(taro, course, "rohto")
+    declare(client, "rohto", data_points=["Rohto share price", "BOJ Tankan", "Our DCF fair value", "Shop visits"],
+            debates=1)
+    # Keyword rules at once: share price, Tankan, DCF; "Shop visits" fits none yet.
+    dp = counts(engine, agent)
+    assert (dp.counts["market"], dp.counts["economic"], dp.counts["internal"], dp.counts["other"]) == (1, 1, 1, 1)
+    assert dp.sorted_by == {"rules": 4}
+
+    sent = []
+    monkeypatch.setattr(market, "ai_key", lambda: "test-key")
+    def model(prompt):
+        sent.append(prompt)
+        return ('```json\n{"types": {"shop visits": "alternative", "rohto share price": "market", '
+                '"boj tankan": "economic", "our dcf fair value": "internal", "not sent": "news"}}\n```')
+    monkeypatch.setattr(market, "ask_model", model)
+    with Session(engine) as db:
+        assert sorter.due(db)
+        record = sorter.run_if_due(db)
+        assert record.ok and record.names == 4 and len(sent) == 1  # every name in one request
+        assert not sorter.due(db)  # nothing left to sort (and too soon anyway)
+    dp = counts(engine, agent)
+    assert dp.counts["alternative"] == 1 and dp.counts["other"] == 0 and dp.sorted_by == {"ai": 4}
+
+    # A new name later: still within the 2 a day, but only after 6 hours.
+    declare(client, "rohto", data_points=["Rohto share price", "Consensus EPS"])
+    with Session(engine) as db:
+        assert not sorter.due(db)
+        db.exec(DataPointRun.__table__.update().values(started_at=utc_now() - timedelta(hours=7)))
+        db.commit()
+        assert sorter.due(db) and sorter.run_if_due(db).names == 1
+        db.exec(DataPointRun.__table__.update().values(started_at=utc_now() - timedelta(hours=7)))
+        db.commit()
+    declare(client, "rohto", data_points=["Something new"])
+    with Session(engine) as db:
+        assert sorter.ai_runs_left(db) == 0 and not sorter.due(db)  # today's share is used up
+        assert sorter.run(db) is None
+
+
+def test_the_owner_sees_where_the_dashboard_would_type_a_name_differently(engine, client, taro, make_person, course,
+                                                                          create_agent):
+    agent = create_agent(taro, course, "rohto")
+    declare(client, "rohto", data_points={"Company data": ["Rohto share price"], "Market prices": ["Nikkei 225"]})
+    dp = counts(engine, agent)
+    assert dp.counts["company"] == 1  # the agent's own type counts
+    assert [(d["name"], d["given"], d["suggested"]) for d in dp.disagreements] == \
+        [("rohto share price", "Company data", "Market prices")]
+    own = taro.get(f"/agents/{agent}").text
+    assert "Suggested types" in own and "rohto share price" in own
+    other = make_person("student", "hanako", gen=9).get(f"/agents/{agent}").text
+    assert "Suggested types" not in other and "rohto share price" not in other  # names stay with the owner

@@ -35,6 +35,7 @@ from db import (
     utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
+import datapoint_types
 import datapoints
 import links
 import forecasts
@@ -606,6 +607,7 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
     context["forecasts"] = forecasts.weekly(db, [agent.id])[agent.id]  # Jimin's Forecast tab (if it sends any)
     context["datapoints"] = datapoints.breakdown(db, agent)  # the Data points tab (None: not declared yet)
     context["datapoint_types"] = [label for _, label in datapoints.TYPES]
+    context["datapoint_sorter"] = datapoint_types.status_line(db) if context["datapoints"] else None
     context["links"] = links.links_for(db, agent.course_id, agent.owner_id, agent.id)  # Linked dashboards
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}

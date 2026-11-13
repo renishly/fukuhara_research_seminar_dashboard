@@ -27,7 +27,7 @@
 {%- endmacro %}
 
 {# The agent page's Data points tab. #}
-{% macro panel(dp, agent) -%}
+{% macro panel(dp, agent, is_owner=False, sorter=None) -%}
 <section class="card" aria-labelledby="datapoints-title">
   <div class="card-body gap-4">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -60,6 +60,26 @@
       {% for h in dp.helpers %}<a href="/agents/{{ h.id }}#datapoints" class="link font-semibold">{{ h.name }}</a>{{ ", " if not loop.last }}{% endfor %}.
       A data point several of them use is counted once.</p>
     {% endif %}
+    {% if dp.auto_sorted %}
+    <p class="text-sm text-base-content/80">{{ dp.auto_sorted }} data point{{ "s" if dp.auto_sorted != 1 }} came without a
+      type and {{ "were" if dp.auto_sorted != 1 else "was" }} sorted by the dashboard
+      ({% if dp.sorted_by.ai %}{{ dp.sorted_by.ai }} by the AI model{% endif %}{% if dp.sorted_by.ai and dp.sorted_by.rules %}, {% endif %}{% if dp.sorted_by.rules %}{{ dp.sorted_by.rules }} by keyword rules for now{% endif %}).</p>
+    {% endif %}
+    {% if is_owner and dp.disagreements %}
+    {# Only the owner sees names: the dashboard suggests another type for these. #}
+    <div class="dp-suggest space-y-2">
+      <p class="text-sm font-semibold">Suggested types <span class="font-normal text-base-content/70">&middot; only you see this</span></p>
+      <p class="text-xs text-base-content/70">Your agent's own types count. The dashboard would file these differently; change
+        them in the agent's <code>set_data_points()</code> if it's right, or leave the type out to let the dashboard sort them.</p>
+      <ul class="space-y-1 text-sm">
+        {% for d in dp.disagreements %}
+        <li><strong class="break-words">{{ d.name }}</strong>: {{ d.given }} &rarr; <strong>{{ d.suggested }}</strong>
+          <span class="text-xs text-base-content/60">({{ "AI model" if d.how == "ai" else "keyword rules" }}{% if d.agent.id != agent.id %}, in {{ d.agent.name }}{% endif %})</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if sorter %}<p class="text-xs text-base-content/60">{{ sorter }}</p>{% endif %}
     {% if dp.missing %}
     <p class="text-sm text-warning-content"><span aria-hidden="true">&#9888;</span> Not found among this student's agents in this class:
       {{ dp.missing | join(", ") }}. Their data points aren't counted.</p>

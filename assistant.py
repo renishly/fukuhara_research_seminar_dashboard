@@ -16,8 +16,9 @@ citing them as [1], [2]... The page shows buttons to open each cited item.
 
 The budget: OpenRouter's daily allowance is shared by the whole seminar
 (OPENROUTER_DAILY_REQUESTS a day). The skill organizer's runs
-(market.MAX_AI_RUNS_PER_DAY) are kept free for it; chat uses the rest, with
-a cap per member. Without an AI key, or once the budget is used up, the chat
+(market.MAX_AI_RUNS_PER_DAY) and the data point sorter's
+(datapoint_types.MAX_AI_RUNS_PER_DAY) are kept free for them; chat uses the
+rest, with a cap per member. Without an AI key, or once the budget is used up, the chat
 still answers with the matching items as search results.
 """
 
@@ -33,9 +34,10 @@ import requests
 from markupsafe import Markup
 from sqlmodel import Session, func, or_, select
 
+import datapoint_types
 import forecasts
 import market
-from db import (Agent, Alumnus, Attachment, ChatMessage, Course, Monitor, OrganizerRun, Output, Skill, StateChange,
+from db import (Agent, Alumnus, Attachment, ChatMessage, Course, DataPointRun, Monitor, OrganizerRun, Output, Skill, StateChange,
                 StoredFile, User, as_utc, utc_now)
 from permissions import visible_courses
 from routes.agent_tools import newest_per, states_for
@@ -251,12 +253,16 @@ def budget(db: Session, viewer: Viewer | None = None) -> dict:
     organizer_used = db.exec(select(func.count(OrganizerRun.id)).where(
         OrganizerRun.jst_date == str(start.date()), OrganizerRun.method == "ai")).one()
     reserved = max(0, market.MAX_AI_RUNS_PER_DAY - organizer_used)
-    chat_left = max(0, total - chat_used - organizer_used - reserved)
+    sorter_used = db.exec(select(func.count(DataPointRun.id)).where(
+        DataPointRun.jst_date == str(start.date()), DataPointRun.method == "ai")).one()
+    sorter_reserved = max(0, datapoint_types.MAX_AI_RUNS_PER_DAY - sorter_used)
+    chat_left = max(0, total - chat_used - organizer_used - reserved - sorter_used - sorter_reserved)
     mine = 0
     if viewer is not None:
         mine = db.exec(select(func.count(ChatMessage.id)).where(
             ChatMessage.user_id == viewer.id, ChatMessage.role == "user", ChatMessage.created_at >= start)).one()
     return {"total": total, "chat_used": chat_used, "organizer_used": organizer_used, "reserved": reserved,
+            "sorter_used": sorter_used, "sorter_reserved": sorter_reserved,
             "chat_left": chat_left, "tokens_today": tokens_today, "mine_left": max(0, QUESTIONS_PER_DAY - mine),
             "per_member": QUESTIONS_PER_DAY, "has_key": bool(market.ai_key()), "key": key_info()}
 

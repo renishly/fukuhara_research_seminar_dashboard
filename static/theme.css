@@ -1053,6 +1053,8 @@ figure.rhythm-mix {
 .budget-chat { background: var(--cobalt); }
 .budget-reserved { background: repeating-linear-gradient(135deg, #6250d6 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px #6250d6; }
 .budget-org { background: #6250d6; }
+.budget-sorter-reserved { background: repeating-linear-gradient(135deg, #eb6834 0 2px, transparent 2px 6px); box-shadow: inset 0 0 0 1px #eb6834; }
+.budget-sorter { background: #eb6834; }
 
 /* Jimin's forecasts (partials/forecast_overview.html, forecast_tab.html). */
 .fc-table tbody + tbody { border-top: 2px solid rgb(11 31 58 / 0.25); }

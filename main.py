@@ -29,6 +29,7 @@ from sqlmodel import Session
 
 # Importing db also loads your .env file (see the top of db.py).
 import storage
+import datapoint_types
 import links as link_check
 import market
 from db import create_db_and_tables, engine
@@ -59,6 +60,14 @@ def organize_if_due() -> None:
             print(f"Market organizer ({record.trigger}): {record.message}")
 
 
+def sort_data_points_if_due() -> None:
+    """Ask the AI for the types of new data point names (datapoint_types.run_if_due())."""
+    with Session(engine) as db:
+        record = datapoint_types.run_if_due(db)
+        if record:
+            print(f"Data point sorter: {record.message}")
+
+
 def check_links_if_due() -> None:
     """The daily check of students' outside links (link_check.check_due())."""
     with Session(engine) as db:
@@ -75,6 +84,10 @@ async def organizer_schedule():
             await run_in_threadpool(organize_if_due)
         except Exception as error:  # noqa: BLE001 - never let the schedule stop
             print(f"Market organizer: {error}")
+        try:
+            await run_in_threadpool(sort_data_points_if_due)
+        except Exception as error:  # noqa: BLE001 - never let the schedule stop
+            print(f"Data point sorter: {error}")
         try:
             await run_in_threadpool(check_links_if_due)
         except Exception as error:  # noqa: BLE001 - never let the schedule stop

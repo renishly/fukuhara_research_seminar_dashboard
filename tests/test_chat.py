@@ -89,10 +89,10 @@ def test_nothing_private_is_sent(engine, client, taro, course, create_agent, ai)
 
 
 def test_the_daily_budget_keeps_the_organizer_runs_and_falls_back_to_search(engine, monkeypatch, taro, course, ai):
-    monkeypatch.setenv("OPENROUTER_DAILY_REQUESTS", "3")  # 2 kept for the skill organizer: 1 left for chat
+    monkeypatch.setenv("OPENROUTER_DAILY_REQUESTS", "5")  # 2 kept for the organizer, 2 for the sorter: 1 for chat
     with Session(engine) as db:
         b = assistant.budget(db)
-    assert (b["total"], b["reserved"], b["chat_left"]) == (3, 2, 1)
+    assert (b["total"], b["reserved"], b["sorter_reserved"], b["chat_left"]) == (5, 2, 2, 1)
     ask(taro, "first question")
     second = ask(taro, "second question").text
     assert "AI budget for chat is used up" in second and len(ai) == 1  # no second AI call
@@ -100,7 +100,7 @@ def test_the_daily_budget_keeps_the_organizer_runs_and_falls_back_to_search(engi
         b = assistant.budget(db)
     assert (b["chat_used"], b["chat_left"], b["tokens_today"]) == (1, 0, 321)
     page = taro.get("/chat").text
-    assert "Kept for the skill organizer" in page and "321" in page
+    assert "Kept for the skill organizer" in page and "Kept for the data point sorter" in page and "321" in page
 
 
 def test_without_a_key_it_still_answers_with_links(monkeypatch, taro, course):

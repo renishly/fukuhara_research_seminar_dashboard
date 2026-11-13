@@ -126,6 +126,7 @@ FUNCTIONS
   set_data_points(data_points, debates=0, uses=None)
                              The "Data points" monitor: how many data points of each
                              type the forecast rests on, as the agent is built now.
+                             Just a list of names works too: the dashboard sorts them.
   set_run_status(last_status, steps=None, last_run=None)
                              The "Run status" monitor: "failed" or a failing / silent
                              step shows the agent as "Needs attention".
@@ -211,10 +212,14 @@ DATA POINTS (what the forecast rests on)
                        "Internal values": ["DCF fair value"],
                        "Company data": 3},
                       debates=1, uses=["News Scout"])
+  or let the dashboard sort them (its AI model suggests a type for each name):
+      set_data_points(["Rohto share price", "BOJ Tankan", "DCF fair value"], debates=1)
   Types (fixed): Internal values (anything the agent works out itself), Market
   prices, Company data, Economic indicators, Analyst & consensus, News & text,
   Alternative data, Other. List each type's data points by name (so one used by
-  several agents counts once; names are never shown) or give a count. uses:
+  several agents counts once; only you see the names) or give a count. Names
+  under a type the dashboard doesn't know are sorted by it too; where it would
+  file a name you typed differently, your agent page shows you. uses:
   your other agents in this class that feed this one; their data points are
   added in. Shown as counts in the Forecasts tab and the agent's Data points tab.
   Debates: debate(text) (any output whose category contains "debate") shows in
@@ -1409,21 +1414,29 @@ def set_data_points(data_points: dict, debates: int = 0, uses=None) -> bool:
     named "Data points"). Send it again whenever the setup changes.
 
     data_points: {type: [data point names] or a count}, e.g.
-                 {"Market prices": ["Rohto share price"], "Company data": 3}.
-                 Types: see DATA_POINT_TYPES; others count as "Other". Names
-                 only make a data point used by several agents count once.
+                 {"Market prices": ["Rohto share price"], "Company data": 3},
+                 or just a list of names, which the dashboard sorts into
+                 types. Types: see DATA_POINT_TYPES; names under another
+                 type are sorted by the dashboard. Names also make a data
+                 point used by several agents count once.
     debates:     how many debates are run to reach the forecast.
     uses:        names of your other agents in this class that feed this one
                  (their data points are added in).
     """
+    if isinstance(data_points, (list, tuple, set)):
+        content = {"data_points": [str(name) for name in data_points], "debates": max(0, int(debates or 0))}
+        if uses:
+            content["uses"] = [str(name) for name in uses]
+        return set_monitor(content, "Data points")
     if not isinstance(data_points, dict):
-        print("[dashboard] Not sent: data_points must be a dict like {\"Market prices\": [\"...\"]}.")
+        print("[dashboard] Not sent: data_points must be a dict like {\"Market prices\": [\"...\"]} or a list of names.")
         return False
     known = {t.lower() for t in DATA_POINT_TYPES}
     cleaned = {}
     for kind, entry in data_points.items():
         if str(kind).strip().lower() not in known:
-            print(f"[dashboard] Data point type {kind!r} isn't one of {', '.join(DATA_POINT_TYPES)}: it counts as Other.")
+            print(f"[dashboard] {kind!r} isn't one of {', '.join(DATA_POINT_TYPES)}: the dashboard will sort its "
+                  "names (a count under it is Other).")
         if isinstance(entry, (list, tuple, set)):
             cleaned[str(kind)] = [str(item) for item in entry]
         elif isinstance(entry, int) and not isinstance(entry, bool) and entry >= 0:
