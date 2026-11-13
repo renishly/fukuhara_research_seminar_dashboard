@@ -266,7 +266,10 @@ def daily_bars(db: Session, agents: list[Agent], states: dict[int, AgentState], 
     """One bar per day for the last 14 days: how many agents were due to run
     that day (by their intervals), split by the worst state each was in that
     day (Live, Needs attention, Offline; "No record" before the feed tracked
-    it). Paused agents aren't counted: they weren't meant to run.
+    it). Today's bar is each agent's state *now* instead, so an agent that was
+    down overnight and has been fixed shows Live straight away, not red until
+    tomorrow (its outage is still in the feed and in earlier days' bars).
+    Paused agents aren't counted: they weren't meant to run.
 
     Due: an agent checking in daily or faster is due every day once it has
     connected; a slower one on the days its schedule falls (its last check-in
@@ -302,15 +305,16 @@ def daily_bars(db: Session, agents: list[Agent], states: dict[int, AgentState], 
         return expected < end
 
     def worst(agent: Agent, start: datetime, end: datetime, is_today: bool) -> str | None:
-        """The worst state that day; None if only paused (not counted)."""
+        """The worst state that day (today: the state now); None if paused (not counted)."""
+        if is_today:
+            key = states[agent.id].key
+            return None if key == "paused" else key
         history = rows[agent.id]
         seen = {state for at, state in history if start <= at < end}
         earlier = [state for at, state in history if at < start]
         if earlier:
             seen.add(earlier[-1])
-        if is_today:
-            seen.add(states[agent.id].key)
-        if not earlier and not any(start <= at < end for at, _ in history) and not is_today:
+        if not earlier and not any(start <= at < end for at, _ in history):
             return "unknown"
         for key in WORST:
             if key in seen:

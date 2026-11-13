@@ -270,3 +270,25 @@ def test_each_feed_category_opens_its_own_dashboard(engine, client, taro, hanako
     assert "park" in data and "new data: parking panel" in data and "1 in 24 h" in data
     assert "No agents here right now." in hanako.get(f"/classes/{course}/feed/paused").text
     assert hanako.get(f"/classes/{course}/feed/nope").status_code == 404
+
+
+def test_todays_bar_shows_the_state_now_not_the_worst_of_the_day(engine, client, taro, hanako, course, create_agent):
+    """An agent that was offline earlier today and has been fixed is Live in
+    today's bar (the outage stays in the feed)."""
+    from routes.agent_tools import states_for
+    from routes.live_feed import daily_bars
+    agent_id = daily_agent(client, create_agent, taro, course, "fixed")
+    with Session(engine) as db:
+        agent = db.get(Agent, agent_id)
+        agent.last_seen_at = utc_now() - timedelta(days=3)  # missed its check-ins: offline
+        db.add(agent)
+        db.commit()
+    hanako.get(f"/classes/{course}/tab/agents")  # the feed notes it went offline
+    with Session(engine) as db:
+        agents = list(db.exec(select(Agent)).all())
+        assert {k: len(v) for k, _, v in daily_bars(db, agents, states_for(db, agents))[-1]["parts"]} == {"offline": 1}
+    client.post("/api/state", json={"check_in_every": DAY}, headers=api("fixed"))  # fixed: checks in again
+    hanako.get(f"/classes/{course}/tab/agents")
+    with Session(engine) as db:
+        agents = list(db.exec(select(Agent)).all())
+        assert {k: len(v) for k, _, v in daily_bars(db, agents, states_for(db, agents))[-1]["parts"]} == {"live": 1}
