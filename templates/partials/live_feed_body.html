@@ -61,10 +61,13 @@
   <ul class="lf-cats">
     {% for c in feed_categories %}
     <li class="lf-cat">
-      <span class="lf-chip lf-chip-{{ c.key }} {{ 'lf-chip-none' if not c.count }}">
+      {# Each chip opens that category's own dashboard (feed_category.html). #}
+      <a href="/classes/{{ feed_course_id }}/feed/{{ c.key }}" class="lf-chip lf-chip-link lf-chip-{{ c.key }} {{ 'lf-chip-none' if not c.count }}"
+         title="Open the {{ c.label | lower }} agents">
         <span class="lf-mark" aria-hidden="true"></span>{{ c.label }} <strong>{{ c.count_text }}</strong>
         {% if c.countdown %}<span class="lf-next">&middot; next run <span class="font-mono" data-countdown="{{ c.countdown }}" data-refresh>--:--:--</span></span>{% endif %}
-      </span>
+        <span aria-hidden="true">&rsaquo;</span>
+      </a>
       <div class="lf-bubble lf-bubble-{{ c.key }}">
         {% if c.entries or c.typing %}
         <ul class="lf-chat">

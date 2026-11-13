@@ -1411,3 +1411,25 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
     opacity: 1;
   }
 }
+
+/* A live feed category's own page (feed_category.html): its chips are links,
+   figures in a row, and one "focus" box per card with what matters for it. */
+a.lf-chip-link { text-decoration: none; color: inherit; }
+a.lf-chip-link:hover, a.lf-chip-link:focus-visible { box-shadow: 2px 2px 0 var(--ink); }
+.lf-chip-current { outline: 2px solid var(--ink); outline-offset: 2px; opacity: 1; }
+.lf-chip-big { font-size: 1.25rem; padding: 0.2rem 0.9rem; }
+.lf-chip-big .lf-mark { width: 0.9rem; height: 0.9rem; }
+.cat-figures { display: flex; flex-wrap: wrap; gap: 0.75rem 2rem; }
+.cat-figures dt { font-size: 0.75rem; color: rgb(11 31 58 / 0.7); }
+.cat-figures dd { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cat-focus { border-left: 4px solid var(--cat, var(--ink)); padding: 0.4rem 0.6rem; background: rgb(11 31 58 / 0.04); font-size: 0.875rem; }
+.cat-live { --cat: var(--green); }
+.cat-attention { --cat: var(--amber); }
+.cat-offline { --cat: var(--red); }
+.cat-paused { --cat: var(--ink); }
+.cat-data { --cat: var(--cobalt); }
+.cat-key-live { background: var(--green); }
+.cat-key-attention { background: var(--amber); }
+.cat-key-offline { background: var(--red); }
+.cat-key-paused { background: var(--ink); border-radius: 0; }
+.cat-key-data { background: var(--cobalt); border-radius: 50%; }

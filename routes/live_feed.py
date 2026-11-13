@@ -29,8 +29,8 @@ from sqlmodel import Session, delete, func, select
 
 from checkins import allowed_gap, check_in_interval, describe
 from db import Agent, CheckInSpan, Monitor, Output, StateChange, User, as_utc, get_session, utc_now
-from routes.agent_tools import AgentState, states_for
-from routes.common import get_course, not_found
+from routes.agent_tools import AgentState, rhythm_mix, states_for
+from routes.common import get_course, not_found, student_groups
 from run_status import RunStatus
 from security import Viewer, require_member
 from web import JST, poll_reply, render, render_text
@@ -389,6 +389,138 @@ def agents_by_state(request: Request, course_id: int, day: str, state: str, view
     return render(request, db, viewer, "agents_by_state.html", course=course, bar=bar, state_key=state,
                   state_words=dict(BAR_STATES)[state], cards=[{"agent": a, "owner": owners.get(a.owner_id),
                                                                "state": states[a.id]} for a in picked])
+
+
+# ---------------------------------------------------------------------------
+# One category's own dashboard (click a chip in the feed)
+# ---------------------------------------------------------------------------
+
+HISTORY_ROWS = 5  # the latest changes on each card
+CATEGORY_NOTES = {
+    "live": "Checking in on time, with nothing wrong in their latest run. Soonest next run first.",
+    "attention": "Running, but something needs fixing: no interval set, a failed run, or a failing or silent step. "
+                 "Longest first.",
+    "offline": "Missed their check-in (by more than half an interval), or never connected. Longest first.",
+    "paused": "Paused by their owners, so not expected to run. Longest first.",
+    "data": "Agents whose runs brought new data in the last 7 days. Newest first.",
+}
+
+
+def shown_agents(db: Session, viewer: Viewer, course) -> list[Agent]:
+    """The class's agents the feed counts: those of the students in the Agents
+    tab (see classes.agents_window()), so the page matches the chip's number."""
+    owners = {cell["student"].id for group in student_groups(db, viewer, course) for cell in group.cells}
+    return list(db.exec(select(Agent).where(Agent.course_id == course.id, Agent.owner_id.in_(owners))).all()) \
+        if owners else []
+
+
+def category_dashboard(db: Session, agents: list[Agent], states: dict[int, AgentState], key: str,
+                       now: datetime | None = None) -> dict:
+    """The agents in one feed category, each with what matters for it, plus a
+    few figures for the whole category."""
+    now = now or utc_now()
+    week_ago, day_ago = now - WEEK, now - DAY
+    ids = [agent.id for agent in agents]
+    history: dict[int, list[StateChange]] = {i: [] for i in ids}
+    data_rows: dict[int, list[StateChange]] = {i: [] for i in ids}
+    if ids:
+        number = func.row_number().over(partition_by=StateChange.agent_id,
+                                        order_by=(StateChange.at.desc(), StateChange.id.desc()))
+        ranked = (select(StateChange.id, number.label("n"))
+                  .where(StateChange.agent_id.in_(ids), StateChange.kind != "start").subquery())
+        latest = [row_id for row_id, n in db.exec(select(ranked.c.id, ranked.c.n)).all() if n <= HISTORY_ROWS]
+        for row in db.exec(select(StateChange).where(StateChange.id.in_(latest))
+                           .order_by(StateChange.at.desc(), StateChange.id.desc())).all() if latest else []:
+            history[row.agent_id].append(row)
+        for row in db.exec(select(StateChange).where(StateChange.agent_id.in_(ids), StateChange.kind == "data",
+                                                     StateChange.at >= week_ago)
+                           .order_by(StateChange.at.desc(), StateChange.id.desc())).all():
+            data_rows[row.agent_id].append(row)
+
+    if key == "data":
+        picked = [agent for agent in agents if data_rows[agent.id]]
+        picked.sort(key=lambda a: as_utc(data_rows[a.id][0].at), reverse=True)
+    else:
+        picked = [agent for agent in agents if states[agent.id].key == key]
+        if key == "live":
+            far = now + timedelta(days=3650)
+            picked.sort(key=lambda a: next_run(a) or far)
+        else:  # longest in this state first
+            picked.sort(key=lambda a: as_utc(a.feed_state_at or a.created_at))
+    owners = {user.id: user for user in db.exec(select(User).where(User.id.in_({a.owner_id for a in picked}))).all()} \
+        if picked else {}
+    weeks = weekly_summaries(db, picked, now)
+
+    cards = []
+    for agent in picked:
+        state = states[agent.id]
+        card = {"agent": agent, "owner": owners.get(agent.owner_id), "state": state, "week": weeks[agent.id],
+                "history": history[agent.id], "countdown": None, "headline": None, "since": None}
+        since = as_utc(agent.feed_state_at) if agent.feed_state_at and agent.feed_state == state.key else None
+        if key == "data":
+            rows = data_rows[agent.id]
+            card["headline"] = rows[0].message
+            card["since"] = as_utc(rows[0].at)
+            card["data_day"] = sum(1 for row in rows if as_utc(row.at) > day_ago)
+            card["data_week"] = len(rows)
+        elif key == "live":
+            run = next_run(agent)
+            card["countdown"] = iso(run) if run and run > now else None
+            card["headline"] = "due now, waiting for its run" if run and run <= now else "next run"
+        else:
+            card["headline"] = state.why
+            card["since"] = since
+            if since:
+                card["for"] = describe((now - since).total_seconds())
+        cards.append(card)
+
+    figures: list[tuple[str, str]] = [("Agents", str(len(picked)))]
+    reasons: list[tuple[str, int]] = []
+    if key == "live":
+        upcoming = [next_run(a) for a in picked if next_run(a) and next_run(a) > now]
+        figures.append(("Due now", str(sum(1 for a in picked if next_run(a) and next_run(a) <= now))))
+    elif key == "data":
+        figures += [("New data in 24 h", str(sum(c["data_day"] for c in cards))),
+                    ("New data in 7 days", str(sum(c["data_week"] for c in cards)))]
+    else:
+        longest = [c for c in cards if c.get("for")]
+        if longest:
+            figures.append(("Longest", longest[0]["for"]))
+        if key in ("attention", "offline"):
+            counted: dict[str, int] = {}
+            for card in cards:
+                reason = (card["headline"] or "unknown").split(":")[0] if key == "attention" else \
+                    ("never connected" if not card["agent"].last_seen_at else "missed check-ins")
+                counted[reason] = counted.get(reason, 0) + 1
+            reasons = sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
+    if picked and key != "paused":
+        figures.append(("Owners", str(len({a.owner_id for a in picked}))))
+    return {"cards": cards, "figures": figures, "reasons": reasons,
+            "next_countdown": iso(min(upcoming)) if key == "live" and upcoming else None,
+            "mix": rhythm_mix(picked, states) if picked else []}
+
+
+@router.get("/classes/{course_id}/feed/{key}")
+def category_page(request: Request, course_id: int, key: str, viewer: Viewer = Depends(require_member),
+                  db: Session = Depends(get_session)):
+    """One feed category's dashboard (Live, Needs attention, Offline, Paused,
+    New data): its agents as cards, whoever owns them."""
+    labels = dict(CATEGORIES)
+    if key not in labels:
+        raise not_found("Unknown category")
+    course = get_course(db, viewer, course_id)
+    agents = shown_agents(db, viewer, course)
+    now = utc_now()
+    states = states_for(db, agents, now)
+    sync_all(db, agents, states, now)
+    counts = {k: n for k, _, n in summary(states)}
+    ids = [agent.id for agent in agents]
+    counts["data"] = db.exec(select(func.count(func.distinct(StateChange.agent_id))).where(
+        StateChange.agent_id.in_(ids), StateChange.kind == "data", StateChange.at >= now - WEEK)).one() if ids else 0
+    board = category_dashboard(db, agents, states, key, now)
+    tabs = [{"key": k, "label": label, "count": counts[k]} for k, label in CATEGORIES]
+    return render(request, db, viewer, "feed_category.html", course=course, key=key, label=labels[key],
+                  note=CATEGORY_NOTES[key], tabs=tabs, **board)
 
 
 # ---------------------------------------------------------------------------

@@ -248,3 +248,25 @@ def test_cards_say_what_changed_this_week(engine, client, taro, hanako, guest, c
     grid = hanako.get(f"/classes/{course}/agents/{taro.id}").text
     assert "This week:</strong> offline 1× (6 h) · new output \u201cDebate\u201d" in grid
     assert "This week" not in guest.get(f"/classes/{course}/agents/{taro.id}").text
+
+
+def test_each_feed_category_opens_its_own_dashboard(engine, client, taro, hanako, course, create_agent):
+    daily_agent(client, create_agent, taro, course, "park")
+    daily_agent(client, create_agent, taro, course, "broken")
+    create_agent(taro, course, "never")  # never connects: offline
+    hanako.get(f"/classes/{course}/tab/agents")  # notes everyone's state
+    run_status(client, "broken", "failed")
+    run_status(client, "park", "new_data", [{"name": "parking panel", "state": "ok", "last_new_data": utc_now().isoformat()}])
+    body = hanako.get(f"/classes/{course}/feed").text
+    for key in ("live", "attention", "offline", "paused", "data"):
+        assert f'href="/classes/{course}/feed/{key}"' in body
+    live = hanako.get(f"/classes/{course}/feed/live").text
+    assert "park" in live and "broken" not in live and "Next run in" in live
+    attention = hanako.get(f"/classes/{course}/feed/attention").text
+    assert "broken" in attention and "park</span>" not in attention and "last run failed" in attention
+    offline = hanako.get(f"/classes/{course}/feed/offline").text
+    assert "never" in offline and "never connected" in offline
+    data = hanako.get(f"/classes/{course}/feed/data").text
+    assert "park" in data and "new data: parking panel" in data and "1 in 24 h" in data
+    assert "No agents here right now." in hanako.get(f"/classes/{course}/feed/paused").text
+    assert hanako.get(f"/classes/{course}/feed/nope").status_code == 404

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "partials/breadcrumbs.html" as nav %}
+{% import "partials/agent_state.html" as states %}
+{% block title %}{{ label }} · {{ course.title }}{% endblock %}
+{% block content %}
+{# One live feed category's dashboard (routes/live_feed.py, category_page()):
+   the class's agents in it, whoever owns them, with what matters for that
+   category: Live counts down to the next run, Needs attention and Offline say
+   why and for how long, New data what came in. Members only. #}
+<main class="mx-auto max-w-6xl space-y-6 px-4 py-8">
+  <header class="space-y-3">
+    {{ nav.crumbs([("Classes", "/classes"), (mask(course_name(course)), "/classes/%d?tab=agents" % course.id),
+                   ("Live feed: " ~ label, None)]) }}
+    <h1 class="page-title flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+      <span class="lf-chip lf-chip-{{ key }} lf-chip-big"><span class="lf-mark" aria-hidden="true"></span>{{ label }}</span>
+      <span class="text-xl font-normal text-base-content/70">{{ cards | length }} agent{{ "s" if cards | length != 1 }}</span>
+    </h1>
+    <p class="text-sm text-base-content/70">{{ note }}</p>
+    {# The other categories, to hop between them. #}
+    <nav class="flex flex-wrap gap-2" aria-label="Live feed categories">
+      {% for t in tabs %}
+      <a href="/classes/{{ course.id }}/feed/{{ t.key }}" class="lf-chip lf-chip-{{ t.key }} lf-chip-link {{ 'lf-chip-none' if not t.count and t.key != key }} {{ 'lf-chip-current' if t.key == key }}"
+         {% if t.key == key %}aria-current="page"{% endif %}>
+        <span class="lf-mark" aria-hidden="true"></span>{{ t.label }} <strong>{{ t.count }}</strong>
+      </a>
+      {% endfor %}
+    </nav>
+  </header>
+
+  {# The category at a glance. #}
+  <section class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <div class="card"><div class="card-body gap-3">
+      <dl class="cat-figures">
+        {% for name, value in figures %}
+        <div><dt>{{ name }}</dt><dd>{{ value }}</dd></div>
+        {% endfor %}
+        {% if next_countdown %}
+        <div><dt>Next run in</dt><dd class="font-mono" data-countdown="{{ next_countdown }}">--:--:--</dd></div>
+        {% endif %}
+      </dl>
+      {% if reasons %}
+      <div>
+        <p class="mb-1 text-xs font-semibold">{{ "Why" if key == "attention" else "How" }}</p>
+        <ul class="space-y-1 text-sm">
+          {% for reason, n in reasons %}
+          <li class="flex justify-between gap-3"><span class="break-words">{{ reason }}</span><strong class="tabular-nums">{{ n }}</strong></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div></div>
+    {% if mix %}
+    <div class="card"><div class="card-body">{{ states.rhythm_bar(mix, cards | length) }}</div></div>
+    {% endif %}
+  </section>
+
+  {% if cards %}
+  <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+    {% for c in cards %}
+    <article class="card cat-card cat-{{ key }}">
+      <div class="card-body gap-2">
+        <p class="text-xs text-base-content/70">{% if c.owner and c.owner.id == viewer.id %}by <strong class="text-base-content">you</strong>{% elif c.owner %}by {{ who(c.owner) }}{% endif %}</p>
+        <div class="flex flex-nowrap items-center gap-x-3">
+          <a href="/agents/{{ c.agent.id }}" title="Open {{ c.agent.name }}" data-marquee class="card-title marquee min-w-0 flex-1 {{ states.name_colour(c.state) }}"><span>{{ c.agent.name }}</span></a>
+          <span class="flex shrink-0 items-center gap-1">{{ states.rhythm(c.state) }}{{ states.pill(c.state, detail=True) }}</span>
+        </div>
+
+        {# What matters for this category, in one box. #}
+        <div class="cat-focus">
+          {% if key == "live" %}
+            {% if c.countdown %}<p>Next run in <strong class="font-mono" data-countdown="{{ c.countdown }}">--:--:--</strong></p>
+            {% else %}<p>{{ c.headline }}</p>{% endif %}
+            <p class="text-xs text-base-content/70">{{ c.state.when }}{% if c.state.every %} &middot; every {{ c.state.every }}{% endif %}</p>
+          {% elif key == "data" %}
+            <p class="break-words">{{ c.headline }}</p>
+            <p class="text-xs text-base-content/70">{{ c.since | jst }} &middot; {{ c.data_day }} in 24 h &middot; {{ c.data_week }} in 7 days</p>
+          {% else %}
+            <p class="break-words">{{ c.headline }}</p>
+            <p class="text-xs text-base-content/70">{% if c.for %}for {{ c.for }} (since {{ c.since | jst }}) &middot; {% endif %}{{ c.state.when }}</p>
+          {% endif %}
+        </div>
+
+        <p class="card-week"><strong>This week:</strong> {% if c.week %}{{ c.week | join(" · ") }}{% else %}no changes{% endif %}</p>
+
+        {% if c.history %}
+        <details class="text-xs">
+          <summary class="cursor-pointer text-base-content/70">Latest changes</summary>
+          <ul class="mt-1 space-y-1">
+            {% for row in c.history %}
+            <li class="flex gap-2"><span class="lf-key cat-key-{{ row.state }} mt-1 shrink-0" aria-hidden="true"></span>
+              <span class="min-w-0"><span class="font-mono text-base-content/60">{{ row.at | jst }}</span> {{ row.message }}</span></li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+        <a href="/agents/{{ c.agent.id }}" class="link link-hover mt-1 self-start text-sm">Open agent &rarr;</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-base-content/70">No agents here right now.</p>
+  {% endif %}
+</main>
+{% endblock %}
