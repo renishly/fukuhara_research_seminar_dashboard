@@ -133,8 +133,10 @@ def test_older_databases_let_skills_have_no_class_or_owner(engine):
 
     from db import allow_empty_columns, create_db_and_tables
 
-    # Simulate the older table, where class and owner were required.
+    # Simulate the older table, where class and owner were required. Its row
+    # points at a class and owner this test never made, so foreign keys are off here.
     with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
         connection.exec_driver_sql('DROP TABLE "skill"')
         connection.exec_driver_sql(
             'CREATE TABLE "skill" (id INTEGER PRIMARY KEY, course_id INTEGER NOT NULL, share VARCHAR NOT NULL, '

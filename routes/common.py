@@ -18,6 +18,7 @@ from db import (
     Agent,
     AgentFolder,
     ExternalLink,
+    StateChange,
     Attachment,
     ClassVisit,
     Command,
@@ -204,7 +205,9 @@ def delete_task(db: Session, task: Task) -> None:
 
 def delete_agent(db: Session, agent: Agent) -> None:
     """Delete an agent with its activity, commands, outputs and monitors (and
-    their files), folder tags, notify bells and Inbox files."""
+    their files), folder tags, notify bells, Inbox files and live feed history.
+    Every table that points at the agent must be cleared here: Postgres
+    refuses to delete an agent that something still points at."""
     for output in db.exec(select(Output).where(Output.agent_id == agent.id)).all():
         file_id = output.file_id
         db.delete(output)
@@ -223,7 +226,7 @@ def delete_agent(db: Session, agent: Agent) -> None:
     for tree in db.exec(select(SkillTree).where(SkillTree.agent_id == agent.id)).all():
         market.delete_tree(db, tree)
     for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter, CheckInSpan,
-                  SkillUpload):
+                  SkillUpload, StateChange):
         db.exec(delete(model).where(model.agent_id == agent.id))
     # Its outside links stay on the student's dashboard, no longer tied to it.
     db.exec(update(ExternalLink).where(ExternalLink.agent_id == agent.id).values(agent_id=None))

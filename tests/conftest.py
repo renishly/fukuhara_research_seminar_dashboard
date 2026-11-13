@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlmodel import Session, create_engine, select  # noqa: E402
 
 from db import Agent, Gen, LoginSession, User, create_db_and_tables, get_session  # noqa: E402
@@ -44,6 +45,13 @@ def engine():
     # StaticPool makes every session share one connection; otherwise each
     # connection to "sqlite://" would get its own empty database.
     test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    # Enforce foreign keys like Postgres (production) does: SQLite ignores them
+    # by default, which once hid a delete that failed on the real site.
+    @event.listens_for(test_engine, "connect")
+    def enforce_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
     create_db_and_tables(test_engine)  # tables, and Gen 1-12
     return test_engine
 
