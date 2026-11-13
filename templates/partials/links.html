@@ -1,0 +1,100 @@
+{# Linked dashboards (links.py): where this student's work lives outside the
+   dashboard. Each link: what it is, its label, who can open it (set by the
+   owner), and what the last check found. Archived links stay listed in grey.
+   The owner gets the Add form and each link's buttons. Members only.
+
+   card(links, course, is_owner, agent=None, agents={}, agent_choices=[]):
+     agent: on an agent's page, its links only (new ones are added to it);
+     agents: {id: Agent} to name the agent a link belongs to on the dashboard;
+     agent_choices: the owner's agents in this class, for "Belongs to". #}
+{% macro card(links, course, is_owner, agent=None, agents={}, agent_choices=[]) -%}
+{% set kinds = {"site": "Site", "artifact": "Artifact", "market": "Market profile", "repo": "Repo", "document": "Document"} %}
+{% set access = {"public": "Public", "keio": "Keio login", "owner": "Owner only"} %}
+<section id="links" class="card" aria-labelledby="links-title">
+  <div class="card-body gap-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="links-title" class="card-title">Linked dashboards</h2>
+      <p class="text-xs text-base-content/70">{{ "Where this agent's work lives outside the dashboard" if agent else "Every place this student's work lives outside the dashboard" }}</p>
+    </div>
+    {% if request.query_params.get("link_error") %}
+    <div role="alert" class="alert alert-error alert-soft text-sm">{{ request.query_params.get("link_error") }}</div>
+    {% endif %}
+
+    {% if links %}
+    <ul class="divide-y divide-base-300">
+      {% for link in links %}{% set st = link_status(link) %}
+      <li class="link-row flex flex-wrap items-start gap-x-4 gap-y-2 py-3 {{ 'link-archived' if link.archived_at }}">
+        <span class="link-kind link-kind-{{ link.kind }}" title="{{ kinds[link.kind] }}">{{ kinds[link.kind] }}</span>
+        <div class="min-w-0 flex-1 basis-56">
+          <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer nofollow" class="link font-semibold break-words">{{ link.label }}</a>
+          <p class="truncate font-mono text-xs text-base-content/60" title="{{ link.url }}">{{ link.url }}</p>
+          {% if not agent and link.agent_id and agents.get(link.agent_id) %}
+          <p class="text-xs">for <a href="/agents/{{ link.agent_id }}" class="link">{{ agents[link.agent_id].name }}</a></p>
+          {% endif %}
+        </div>
+        <span class="link-access link-access-{{ link.access }}">{{ access[link.access] }}</span>
+        <div class="basis-48 text-xs">
+          {% if link.archived_at %}
+          <p class="text-base-content/60">Archived {{ link.archived_at | jst }}</p>
+          {% else %}
+          <p class="link-check link-check-{{ st.key }}">{% if st.key == "ok" %}&#10003; {% elif st.key in ("broken", "failing") %}&#10007; {% endif %}{{ st.text }}{% if link.checked_at %} &middot; {{ link.checked_at | jst }}{% endif %}</p>
+          {% if link.changed_at %}<p class="text-base-content/70">changed on that site {{ link.changed_at | jst }}</p>{% endif %}
+          {% if st.warn %}<p class="link-warn"><span aria-hidden="true">&#9888;</span> {{ st.warn }}</p>{% endif %}
+          {% endif %}
+        </div>
+        {% if is_owner %}
+        <div class="flex flex-wrap gap-1" x-data="{ sure: false }">
+          {% if not link.archived_at %}
+          <form method="post" action="/links/{{ link.id }}/check"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn-ghost btn-xs">Check now</button></form>
+          <form method="post" action="/links/{{ link.id }}/archive"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn-ghost btn-xs">Archive</button></form>
+          {% else %}
+          <form method="post" action="/links/{{ link.id }}/restore"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn-ghost btn-xs">Restore</button></form>
+          {% endif %}
+          <button type="button" class="btn btn-ghost btn-xs text-error" x-show="!sure" @click="sure = true">Delete</button>
+          <form method="post" action="/links/{{ link.id }}/delete" x-show="sure" x-cloak class="flex gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn-error btn-xs">Delete for good</button>
+            <button type="button" class="btn btn-ghost btn-xs" @click="sure = false">Keep</button>
+          </form>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-base-content/70">{{ "No outside links yet." if is_owner else "No outside links." }}</p>
+    {% endif %}
+
+    {% if is_owner %}
+    <details class="link-add" {{ 'open' if request.query_params.get("link_error") }}>
+      <summary class="btn btn-primary btn-sm w-fit">+ Add link</summary>
+      <form method="post" action="/classes/{{ course.id }}/links" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        {% if agent %}<input type="hidden" name="agent_id" value="{{ agent.id }}">{% endif %}
+        <label class="form-control sm:col-span-2"><span class="label-text text-xs font-semibold">Address</span>
+          <input type="url" name="url" required maxlength="2000" placeholder="https://..." class="input input-sm w-full"></label>
+        <label class="form-control sm:col-span-2"><span class="label-text text-xs font-semibold">Label: one line on what's there</span>
+          <input type="text" name="label" maxlength="120" class="input input-sm w-full"></label>
+        <label class="form-control"><span class="label-text text-xs font-semibold">What it is</span>
+          <select name="kind" class="select select-sm w-full">{% for k, l in kinds.items() %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+        <label class="form-control"><span class="label-text text-xs font-semibold">Who can open it</span>
+          <select name="access" class="select select-sm w-full">{% for k, l in access.items() %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+        {% if not agent and agent_choices %}
+        <label class="form-control sm:col-span-2"><span class="label-text text-xs font-semibold">Belongs to</span>
+          <select name="agent_id" class="select select-sm w-full">
+            <option value="">My dashboard (no particular agent)</option>
+            {% for a in agent_choices %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+          </select></label>
+        {% endif %}
+        <p class="text-xs text-base-content/70 sm:col-span-2">It's checked when you save it and once a day after that (just
+          whether it opens, and when it last changed). The dashboard never logs in or copies the page.</p>
+        <div class="sm:col-span-2"><button type="submit" class="btn btn-primary btn-sm">Save link</button></div>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+</section>
+{%- endmacro %}

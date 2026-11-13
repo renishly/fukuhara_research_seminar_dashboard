@@ -7,7 +7,8 @@ An agent sends its weekly forecast as an output in the category "Forecast"
     output({
       "target": "Mitsui Fudosan (8801)",   # what it forecasts
       "week": "2026-W46",                  # optional: ISO week (default: the week it was sent, Japan time)
-      "value": 1205,                       # the forecast, e.g. a fair value
+      "value": 1205,                       # the forecast: a number (a fair value...) or a decision
+                                           # as text ("NO", "Overweight") or true/false
       "unit": "JPY",                       # optional
       "market": 1470,                      # optional: today's market price, for comparison
       "view": "Underweight",               # optional: e.g. Overweight / Neutral / Underweight
@@ -42,7 +43,7 @@ MAX_EVIDENCE = 20
 class Forecast:
     week: str  # "2026-W46"
     target: str
-    value: float
+    value: float | str  # a number, or the decision as text
     unit: str = ""
     market: float | None = None
     view: str = ""
@@ -60,9 +61,13 @@ class Forecast:
         return f"Week of {monday:%b} {monday.day}, {monday.year}"
 
     @property
+    def is_number(self) -> bool:
+        return isinstance(self.value, float)
+
+    @property
     def vs_market(self) -> float | None:
-        """How far the forecast is from the market price, in % (None without one)."""
-        return (self.value - self.market) / self.market * 100 if self.market else None
+        """How far the forecast is from the market price, in % (None without one, or for a text decision)."""
+        return (self.value - self.market) / self.market * 100 if self.market and self.is_number else None
 
 
 def week_of(moment: datetime) -> str:
@@ -85,6 +90,18 @@ def _text(raw, limit: int) -> str:
     return " ".join(str(raw).split())[:limit] if raw is not None else ""
 
 
+def _value(raw) -> float | str | None:
+    """A forecast's value: a number (also "1,205"), else the decision as text
+    (true/false -> "Yes"/"No"). None for nothing, or a list or dict."""
+    if isinstance(raw, bool):
+        return "Yes" if raw else "No"
+    if (number := _number(raw)) is not None and number == number and abs(number) != float("inf"):
+        return number
+    if isinstance(raw, (str, int, float)):
+        return _text(raw, 80) or None
+    return None
+
+
 def parse(output: Output) -> Forecast | None:
     """A Forecast output's content, or None if it can't be read."""
     if output.category.strip().lower() != CATEGORY or output.kind != "json":
@@ -95,7 +112,7 @@ def parse(output: Output) -> Forecast | None:
         return None
     if not isinstance(data, dict):
         return None
-    value = _number(data.get("value"))
+    value = _value(data.get("value"))
     if value is None:
         return None
     week = str(data.get("week") or "")
@@ -139,9 +156,14 @@ def weekly(db: Session, agent_ids: list[int], weeks: int = MAX_WEEKS) -> dict[in
 
 
 def change(this: Forecast, last: Forecast | None) -> dict | None:
-    """This week's forecast against last week's: the difference and %."""
+    """This week's forecast against last week's: the difference and % for
+    numbers; for decisions, whether it changed ("changed" / "same", with the
+    one before)."""
     if last is None:
         return None
+    if not (this.is_number and last.is_number):
+        same = str(this.value).lower() == str(last.value).lower()
+        return {"direction": "same" if same else "changed", "before": last.value}
     difference = this.value - last.value
     percent = difference / last.value * 100 if last.value else None
     return {"difference": difference, "percent": percent,
@@ -171,10 +193,12 @@ def by_person(db: Session, students: list, agents: list[Agent]) -> list[dict]:
             for student in students]
 
 
-def number(value: float | None) -> str:
-    """1205.0 -> "1,205"; 12.345 -> "12.35"."""
+def number(value: float | str | None) -> str:
+    """1205.0 -> "1,205"; 12.345 -> "12.35"; a text decision as it is."""
     if value is None:
         return "—"
+    if isinstance(value, str):
+        return value
     return f"{value:,.0f}" if abs(value) >= 100 or value == int(value) else f"{value:,.2f}"
 
 

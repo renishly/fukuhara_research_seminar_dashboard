@@ -32,7 +32,7 @@ def test_one_forecast_per_week_newest_counts_and_bad_ones_are_ignored(engine, cl
     send(client, "mitsui", week="2026-W46", value=1205, view="Underweight", market=1470,
          why_changed="Fama-French cost of equity rose", evidence=[{"title": "Peers", "url": "https://example.com/p"},
                                                                  {"title": "Bad link", "url": "javascript:alert(1)"}])
-    send(client, "mitsui", value="not a number")  # ignored
+    send(client, "mitsui", week="2026-W46", value=[1, 2])  # a list isn't a forecast: ignored
     client.post("/api/outputs", json={"category": "Forecast", "content": "just text"}, headers=api("mitsui"))  # ignored
     with Session(engine) as db:
         weeks = weekly(db, [agent])[agent]
@@ -70,3 +70,27 @@ def test_a_person_with_several_forecasting_agents_gets_a_line_each(client, taro,
     tab = taro.get(f"/classes/{course}", params={"tab": "forecasts"}).text
     assert 'rowspan="2"' in tab and "2 forecasts" in tab and "Mitsui Fudosan (8801)" in tab and "MUFG (8306)" in tab
     assert ">You" in tab
+
+
+def test_a_decision_forecast_shows_the_decision_and_whether_it_changed(engine, client, taro, course, create_agent):
+    agent = create_agent(taro, course, "spacex")
+    target = "Will SpaceX top $3T by 31 Dec?"
+    send(client, "spacex", target=target, week="2026-W45", value="YES", unit="")
+    send(client, "spacex", target=target, week="2026-W46", value="NO", unit="", market=0.26)
+    with Session(engine) as db:
+        weeks = weekly(db, [agent])[agent]
+    assert [f.value for f in weeks] == ["NO", "YES"] and weeks[0].vs_market is None
+    tab = taro.get(f"/classes/{course}", params={"tab": "forecasts"}).text
+    assert ">NO<" in tab and ">YES<" in tab and "changed</span>" in tab and "from YES" in tab
+    page = taro.get(f"/agents/{agent}").text
+    assert ">NO <" in page or ">NO" in page
+    send(client, "spacex", target=target, week="2026-W47", value=True)
+    with Session(engine) as db:
+        assert weekly(db, [agent])[agent][0].value == "Yes"
+
+
+def test_numbers_sent_as_text_still_count_as_numbers(engine, client, taro, course, create_agent):
+    agent = create_agent(taro, course, "mitsui")
+    send(client, "mitsui", week="2026-W46", value="1,205")
+    with Session(engine) as db:
+        assert weekly(db, [agent])[agent][0].value == 1205.0

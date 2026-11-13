@@ -122,6 +122,10 @@ FUNCTIONS
                 evidence=None, week=None)
                              The weekly forecast, in the seminar's standard shape
                              (the class's Forecasts tab compares it with last week's).
+                             value: a number, or the decision itself ("NO", "Overweight").
+  set_data_points(data_points, debates=0, uses=None)
+                             The "Data points" monitor: how many data points of each
+                             type the forecast rests on, as the agent is built now.
   set_run_status(last_status, steps=None, last_run=None)
                              The "Run status" monitor: "failed" or a failing / silent
                              step shows the agent as "Needs attention".
@@ -197,6 +201,22 @@ WEEKLY FORECAST (the seminar's standard, so forecasts can be compared)
   sent (the newest forecast in a week counts). It shows in the class's
   Forecasts tab (this week vs last) and in the agent's Forecast tab. It's an
   output in the category "Forecast", so output(dict, "Forecast") works too.
+  value can also be a decision: send_forecast("Will SpaceX top $3T by 31 Dec?", "NO");
+  the Forecasts tab then says whether it changed since last week.
+
+DATA POINTS (what the forecast rests on)
+  Declare the agent's current setup, and again whenever it changes (not every
+  run: a fetch that fails once doesn't change it):
+      set_data_points({"Market prices": ["Rohto share price", "Nikkei 225"],
+                       "Internal values": ["DCF fair value"],
+                       "Company data": 3},
+                      debates=1, uses=["News Scout"])
+  Types (fixed): Internal values (anything the agent works out itself), Market
+  prices, Company data, Economic indicators, Analyst & consensus, News & text,
+  Alternative data, Other. List each type's data points by name (so one used by
+  several agents counts once; names are never shown) or give a count. uses:
+  your other agents in this class that feed this one; their data points are
+  added in. Shown as counts in the Forecasts tab and the agent's Data points tab.
   Debates: debate(text) (any output whose category contains "debate") shows in
   the agent's Debate tab.
 
@@ -1340,24 +1360,27 @@ def _iso(moment) -> str | None:
     return str(moment)
 
 
-def send_forecast(target: str, value: float, unit: str | None = None, market: float | None = None,
+def send_forecast(target: str, value, unit: str | None = None, market: float | None = None,
                   view: str | None = None, why_changed: str | None = None, evidence=None,
                   week: str | None = None) -> bool:
     """This week's forecast, in the seminar's standard shape (an output in the
     category "Forecast"). The class's Forecasts tab compares it with last week's.
 
     target:      what you forecast, e.g. "Mitsui Fudosan (8801)".
-    value:       the forecast, e.g. a fair value per share (a number).
+    value:       the forecast: a number (e.g. a fair value per share), or the
+                 decision itself as text or True/False (e.g. "NO", "Overweight").
     unit:        e.g. "JPY". market: today's market price, for comparison.
     view:        e.g. "Overweight", "Neutral", "Underweight".
     why_changed: why it differs from last week's.
     evidence:    sources: [("title", "https://...")] or [{"title", "url"}] or ["https://..."].
     week:        an ISO week like "2026-W46" (default: the week it's sent).
     """
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        print(f"[dashboard] Not sent: the forecast value {value!r} isn't a number.")
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        number = value
+    elif isinstance(value, str) and value.strip():
+        number = value.strip()
+    else:
+        print(f"[dashboard] Not sent: the forecast value {value!r} isn't a number or a decision (text).")
         return False
     items = []
     for item in evidence or []:
@@ -1375,6 +1398,42 @@ def send_forecast(target: str, value: float, unit: str | None = None, market: fl
     if items:
         forecast["evidence"] = items
     return output(forecast, "Forecast")
+
+
+DATA_POINT_TYPES = ("Internal values", "Market prices", "Company data", "Economic indicators",
+                    "Analyst & consensus", "News & text", "Alternative data", "Other")
+
+
+def set_data_points(data_points: dict, debates: int = 0, uses=None) -> bool:
+    """What this agent's forecast rests on, as it is built now (the monitor
+    named "Data points"). Send it again whenever the setup changes.
+
+    data_points: {type: [data point names] or a count}, e.g.
+                 {"Market prices": ["Rohto share price"], "Company data": 3}.
+                 Types: see DATA_POINT_TYPES; others count as "Other". Names
+                 only make a data point used by several agents count once.
+    debates:     how many debates are run to reach the forecast.
+    uses:        names of your other agents in this class that feed this one
+                 (their data points are added in).
+    """
+    if not isinstance(data_points, dict):
+        print("[dashboard] Not sent: data_points must be a dict like {\"Market prices\": [\"...\"]}.")
+        return False
+    known = {t.lower() for t in DATA_POINT_TYPES}
+    cleaned = {}
+    for kind, entry in data_points.items():
+        if str(kind).strip().lower() not in known:
+            print(f"[dashboard] Data point type {kind!r} isn't one of {', '.join(DATA_POINT_TYPES)}: it counts as Other.")
+        if isinstance(entry, (list, tuple, set)):
+            cleaned[str(kind)] = [str(item) for item in entry]
+        elif isinstance(entry, int) and not isinstance(entry, bool) and entry >= 0:
+            cleaned[str(kind)] = entry
+        else:
+            print(f"[dashboard] Skipped {kind!r}: give a list of names or a count.")
+    content = {"data_points": cleaned, "debates": max(0, int(debates or 0))}
+    if uses:
+        content["uses"] = [str(name) for name in uses]
+    return set_monitor(content, "Data points")
 
 
 def step(name: str, state: str = "ok", last_run=None, last_new_data=None, note: str | None = None) -> dict:

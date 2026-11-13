@@ -909,7 +909,8 @@ def test_connector_sends_forecasts_run_status_debates_and_categorised_skills(eng
     assert connector.send_forecast("Mitsui Fudosan (8801)", 1205, unit="JPY", market=1470, view="Underweight",
                                    why_changed="Cost of equity rose", evidence=[("Peers", "https://example.com/p")],
                                    week="2026-W46")
-    assert connector.send_forecast("x", "not a number") is False  # refused before sending
+    assert connector.send_forecast("x", None) is False  # neither a number nor a decision: refused before sending
+    assert connector.send_forecast("x", ["a list"]) is False
     with Session(engine) as db:
         forecast = weekly(db, [agent_id])[agent_id][0]
     assert (forecast.target, forecast.value, forecast.view) == ("Mitsui Fudosan (8801)", 1205.0, "Underweight")

@@ -1,0 +1,69 @@
+{# Data points (datapoints.py): how many of each type an agent's forecast
+   rests on, its helper agents included. Only counts are shown, never the
+   data points themselves. Debates are counted next to them but left out of
+   the share bar, since a debate isn't a data point. Every count is also
+   written out, so nothing is told by colour alone. #}
+
+{% macro bar(dp, height="dp-bar") -%}
+<div class="{{ height }}" role="img"
+     aria-label="{% for part in dp.parts() %}{{ part.label }}: {{ part.count }} ({{ part.percent }}%){{ '; ' if not loop.last }}{% endfor %}">
+  {% for part in dp.parts() %}
+  <span class="dp-seg dp-{{ part.key }}" style="flex-grow: {{ part.count }}" title="{{ part.label }}: {{ part.count }} ({{ part.percent }}%)"></span>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{# For the Forecasts table: a thin share bar, then "Market prices 2 · ... · Debates 1". #}
+{% macro summary(dp) -%}
+<div class="dp-summary">
+  {% if dp.total %}{{ bar(dp, "dp-bar dp-bar-thin") }}{% endif %}
+  <p class="text-xs">
+    {% for part in dp.parts() %}<span class="whitespace-nowrap"><span class="dp-swatch dp-{{ part.key }}" aria-hidden="true"></span>{{ part.label }} <strong class="tabular-nums">{{ part.count }}</strong>{{ "&nbsp;·" | safe if not loop.last or dp.debates }}</span> {% endfor %}
+    {% if dp.debates %}<span class="whitespace-nowrap">Debates <strong class="tabular-nums">{{ dp.debates }}</strong></span>{% endif %}
+    {% if not dp.total and not dp.debates %}<span class="text-base-content/60">none declared</span>{% endif %}
+  </p>
+  {% if dp.helpers %}<p class="text-xs text-base-content/60">incl. {{ dp.helpers | length }} helper agent{{ "s" if dp.helpers | length != 1 }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{# The agent page's Data points tab. #}
+{% macro panel(dp, agent) -%}
+<section class="card" aria-labelledby="datapoints-title">
+  <div class="card-body gap-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="datapoints-title" class="card-title">Data points</h2>
+      <p class="text-xs text-base-content/70">The agent's current setup{% if dp.helpers %}, its helper agents included{% endif %}</p>
+    </div>
+    <dl class="cat-figures">
+      <div><dt>Data points</dt><dd>{{ dp.total }}</dd></div>
+      <div><dt>External</dt><dd>{{ dp.external }}</dd></div>
+      <div><dt>Internal values</dt><dd>{{ dp.counts.internal }}</dd></div>
+      <div><dt>Debates</dt><dd>{{ dp.debates }}</dd></div>
+    </dl>
+    {% if dp.total %}
+    {# A div, not a <figure>: daisyUI lays out every figure in a .card as a centred row. #}
+    <div class="space-y-3" role="group" aria-labelledby="dp-share">
+      <p id="dp-share" class="text-sm font-semibold">Share of each type</p>
+      {{ bar(dp) }}
+      <ul class="dp-legend">
+        {% for part in dp.parts() %}
+        <li><span class="dp-swatch dp-{{ part.key }}" aria-hidden="true"></span><span>{{ part.label }}</span>
+          <span class="tabular-nums"><strong>{{ part.count }}</strong> <span class="text-base-content/60">({{ part.percent }}%)</span></span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70">No data points declared yet.</p>
+    {% endif %}
+    {% if dp.helpers %}
+    <p class="text-sm">Includes the data points of
+      {% for h in dp.helpers %}<a href="/agents/{{ h.id }}#datapoints" class="link font-semibold">{{ h.name }}</a>{{ ", " if not loop.last }}{% endfor %}.
+      A data point several of them use is counted once.</p>
+    {% endif %}
+    {% if dp.missing %}
+    <p class="text-sm text-warning-content"><span aria-hidden="true">&#9888;</span> Not found among this student's agents in this class:
+      {{ dp.missing | join(", ") }}. Their data points aren't counted.</p>
+    {% endif %}
+  </div>
+</section>
+{%- endmacro %}

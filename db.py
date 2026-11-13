@@ -592,6 +592,30 @@ class OrganizerRun(SQLModel, table=True):
     finished_at: datetime | None = None
 
 
+class ExternalLink(SQLModel, table=True):
+    """A place outside the dashboard where a student's work lives (their own
+    site, a Claude artifact, a repo...), on their agent dashboard in one class,
+    and optionally tied to one of their agents (see links.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: int = Field(foreign_key="user.id", index=True)
+    course_id: int = Field(foreign_key="course.id", index=True)
+    agent_id: int | None = Field(default=None, foreign_key="agent.id", index=True)
+    url: str
+    kind: str  # "site", "artifact", "market", "repo" or "document"
+    label: str  # one line on what's there
+    access: str  # who can open it, set by the owner: "public", "keio" or "owner"
+    # The latest check (links.py): "ok", "login" (answered with a login) or
+    # "failed"; None until first checked. Two failures in a row = Broken.
+    result: str | None = None
+    failures: int = 0
+    note: str = ""  # what the last check found, in words
+    checked_at: datetime | None = None
+    changed_at: datetime | None = None  # when the page says it last changed
+    archived_at: datetime | None = None  # retired by the owner: still listed, in grey
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 # ---------------------------------------------------------------------------
 # Connecting, creating tables, and the first gens
 # ---------------------------------------------------------------------------

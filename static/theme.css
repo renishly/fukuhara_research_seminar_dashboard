@@ -647,6 +647,12 @@ main > *:nth-child(5) { animation-delay: 0.24s; }
   font-weight: 600;
   white-space: nowrap;
 }
+/* A plain block even inside a .card, where daisyUI makes every <figure> a
+   centred flex row (for card images), which squashed the bar to a sliver. */
+figure.rhythm-mix {
+  display: block;
+  margin: 0;
+}
 .rhythm-bar {
   display: flex;
   gap: 2px;
@@ -1433,3 +1439,93 @@ a.lf-chip-link:hover, a.lf-chip-link:focus-visible { box-shadow: 2px 2px 0 var(-
 .cat-key-offline { background: var(--red); }
 .cat-key-paused { background: var(--ink); border-radius: 0; }
 .cat-key-data { background: var(--cobalt); border-radius: 50%; }
+
+/* Data points (partials/datapoints.html): one colour per type. Internal
+   values are slate, set apart from the external types. Every count is also
+   written out next to its swatch. */
+.dp-internal { --dp: #5b6b82; }
+.dp-market { --dp: #256dc8; }
+.dp-company { --dp: #eb6834; }
+.dp-economic { --dp: #1baf7a; }
+.dp-analyst { --dp: #6250d6; }
+.dp-news { --dp: #e87ba4; }
+.dp-alternative { --dp: #c9a227; }
+.dp-other { --dp: #b9c3d3; }
+.dp-bar {
+  display: flex;
+  gap: 2px;
+  height: 1.25rem;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dp-bar-thin { height: 0.375rem; width: 100%; min-width: 8rem; margin-bottom: 0.25rem; }
+.dp-seg { flex-basis: 0; min-width: 3px; background: var(--dp); }
+.dp-swatch {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: 0.25rem;
+  border-radius: 2px;
+  background: var(--dp);
+  vertical-align: baseline;
+}
+.dp-summary { min-width: 10rem; max-width: 22rem; }
+.dp-summary p { white-space: normal; }
+.dp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1.75rem;
+  font-size: 0.875rem;
+}
+.dp-legend li { display: flex; align-items: center; gap: 0.375rem; }
+.fc-changed { color: #8a5a00; }
+
+/* Linked dashboards (partials/links.html). The kind is a small navy tag;
+   the access tag and the check result are written out, with colour as a
+   second cue only. */
+.link-kind {
+  flex-shrink: 0;
+  min-width: 6.5rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  background: var(--ink);
+  color: #ffffff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.link-access {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.link-access-public { color: #11714f; }
+.link-access-keio { color: #2264b7; }
+.link-access-owner { color: #8a5a00; }
+.link-check-ok { color: #11714f; }
+.link-check-login { color: #2264b7; }
+.link-check-failing { color: #8a5a00; }
+.link-check-broken { color: var(--red); font-weight: 600; }
+.link-check-unchecked { color: rgb(11 31 58 / 0.6); }
+.link-warn { color: #8a5a00; font-weight: 600; }
+.link-archived { opacity: 0.55; }
+.link-archived .link-kind { background: #8a96a8; }
+.link-add > summary { list-style: none; }
+.link-add > summary::-webkit-details-marker { display: none; }
+/* When the card is wide enough, each part of a link sits in its own column
+   (by the card's width, not the screen's: it's narrower beside Controls). */
+#links { container-type: inline-size; }
+@container (min-width: 60rem) {
+  .link-row {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr) 7rem minmax(0, 20rem) auto;
+    align-items: start;
+  }
+  .link-access { justify-self: start; }
+}

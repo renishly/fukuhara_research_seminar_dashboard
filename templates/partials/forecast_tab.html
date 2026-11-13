@@ -21,7 +21,7 @@
           <p class="font-mono text-3xl font-bold">{{ item.value | num }} <span class="text-base font-normal">{{ item.unit }}</span></p>
           <p class="flex flex-wrap gap-2 text-sm">
             {% if item.view %}<span class="badge badge-outline">{{ item.view }}</span>{% endif %}
-            {% if item.market %}<span class="text-base-content/70">market {{ item.market | num }} ({{ "%+.1f" | format(item.vs_market) }}%)</span>{% endif %}
+            {% if item.market and item.vs_market is not none %}<span class="text-base-content/70">market {{ item.market | num }} ({{ "%+.1f" | format(item.vs_market) }}%)</span>{% endif %}
           </p>
           {% else %}<p class="text-sm text-base-content/60">No forecast that week.</p>{% endif %}
         </div>

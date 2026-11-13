@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "partials/breadcrumbs.html" as nav %}
+{% import "partials/links.html" as linkui with context %}
 {% block title %}{{ who(owner) }}'s agents · {{ mask(course_name(course)) }}{% endblock %}
 {% block content %}
 {% set folder_param = "&folder=%d" % current_folder.id if current_folder else "" %}
@@ -79,6 +80,10 @@
         {% include "partials/agent_cards.html" %}
         <input type="hidden" id="grid-seen" name="seen" value="">
       </div>
+      {# Linked dashboards: where this student's work lives outside the dashboard (members only). #}
+      {% if viewer.is_member and (links or is_owner) %}
+      {{ linkui.card(links, course, is_owner, agents=link_agents, agent_choices=link_agent_choices) }}
+      {% endif %}
     </main>
   </div>
 

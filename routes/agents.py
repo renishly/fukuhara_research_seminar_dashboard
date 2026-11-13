@@ -35,6 +35,8 @@ from db import (
     utc_now,
 )
 from permissions import can_submit, can_view_agent_page, owns_agent, student_is_enrolled
+import datapoints
+import links
 import forecasts
 import run_status
 from checkins import activity as checkin_activity
@@ -272,6 +274,11 @@ def agent_grid_page(request: Request, course_id: int, student_id: int, page: int
     owner = dashboard_owner(db, viewer, course, student_id)
     current = folder_for_grid(db, owner, folder) if viewer.is_member else None
     context = grid_context(db, viewer, course, owner, page, current) | sidebar_context(db, course, owner, current)
+    if viewer.is_member:  # Linked dashboards (members only)
+        own = list(db.exec(select(Agent).where(Agent.course_id == course.id, Agent.owner_id == owner.id)
+                           .order_by(func.lower(Agent.name))).all())
+        context |= {"links": links.links_for(db, course.id, owner.id), "link_agents": {a.id: a for a in own},
+                    "link_agent_choices": own}
     if context["is_owner"]:
         context |= {"site_url": site_url(request)}  # the connector's text loads when it's opened
     return render(request, db, viewer, "agent_grid.html", owner_gen=student_label(db, owner), **context)
@@ -597,6 +604,9 @@ def agent_page(request: Request, agent_id: int, viewer: Viewer = Depends(current
     context["activity"] = checkin_activity(db, agent, context["state"].rhythm)
     context |= debate_context(db, agent)
     context["forecasts"] = forecasts.weekly(db, [agent.id])[agent.id]  # Jimin's Forecast tab (if it sends any)
+    context["datapoints"] = datapoints.breakdown(db, agent)  # the Data points tab (None: not declared yet)
+    context["datapoint_types"] = [label for _, label in datapoints.TYPES]
+    context["links"] = links.links_for(db, agent.course_id, agent.owner_id, agent.id)  # Linked dashboards
     if owns_agent(viewer, agent):
         context |= inbox_context(db, agent) | {"site_url": site_url(request)}
     course = db.get(Course, agent.course_id)

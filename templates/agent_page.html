@@ -2,6 +2,8 @@
 {% import "partials/breadcrumbs.html" as nav %}
 {% import "partials/icons.html" as icon %}
 {% import "partials/dropzone.html" as drop %}
+{% import "partials/datapoints.html" as points %}
+{% import "partials/links.html" as linkui with context %}
 {% block title %}{{ agent.name }} · Agent{% endblock %}
 {% block content %}
 {# Layout: Monitor, Outputs and Activity in the main column. The owner's
@@ -20,7 +22,7 @@
        for agents that post debate results. #}
     {% set tabs = [("overview", "Overview")] + ([("forecast", "Forecast")] if forecasts else [])
                   + [("monitors", "Monitors"), ("outputs", "Outputs")]
-                  + ([("debate", "Debate")] if debate else []) + [("activity", "Activity")] %}
+                  + ([("debate", "Debate")] if debate else []) + [("activity", "Activity"), ("datapoints", "Data points")] %}
     <div class="min-w-0 space-y-6"
          x-data="{ tab: 'overview', names: {{ tabs | map('first') | list | tojson | forceescape }},
                    pick(name) { this.tab = name; history.replaceState(null, '', '#' + name); } }"
@@ -34,6 +36,8 @@
       <div x-show="tab === 'overview'" class="space-y-8">
         {% include "partials/run_steps.html" %}
         {% include "partials/checkin_graph.html" %}
+        {# Linked dashboards: this agent's places outside the dashboard. #}
+        {% if links or is_owner %}{{ linkui.card(links, course, is_owner, agent=agent) }}{% endif %}
       </div>
       {% if forecasts %}
       <div x-show="tab === 'forecast'" x-cloak>{% include "partials/forecast_tab.html" %}</div>
@@ -54,6 +58,26 @@
           </div>
         </div>
       </section>
+      {# Data points (datapoints.py): how many of each type its forecast rests on. #}
+      <div x-show="tab === 'datapoints'" x-cloak>
+        {% if datapoints %}{{ points.panel(datapoints, agent) }}
+        {% else %}
+        <section class="card"><div class="card-body gap-2">
+          <h2 class="card-title">Data points</h2>
+          <p class="text-sm text-base-content/70">This agent hasn't declared its data points yet. It sends its current setup
+            as a monitor named <code>Data points</code>, and again whenever the setup changes:</p>
+          <pre class="overflow-x-auto rounded bg-base-200 p-3 text-xs"><code>set_monitor({
+  "data_points": {"Market prices": ["Rohto share price"], "Internal values": ["DCF fair value"],
+                  "Company data": 3},
+  "debates": 1,
+  "uses": ["News Scout"]
+}, "Data points")</code></pre>
+          <p class="text-xs text-base-content/70">Types: {{ datapoint_types | join(", ") }}. List each type's data points by
+            name (so one used by several agents counts once) or give a count. <code>uses</code> names this student's agents
+            whose data points feed this one.</p>
+        </div></section>
+        {% endif %}
+      </div>
     </div>
 
     {% if is_owner %}

@@ -56,6 +56,8 @@ It's written in Python with [FastAPI](https://fastapi.tiangolo.com/). The pages 
 | `checkins.py` | Each agent's check-in history (merged into spans) and the Check-in activity graph |
 | `run_status.py` | Reads an agent's "Run status" monitor (failed runs, failing or silent steps) |
 | `forecasts.py` | Reads agents' weekly "Forecast" outputs; this week vs last |
+| `datapoints.py` | Reads agents' "Data points" monitors: data points per type, helper agents included |
+| `links.py` | Linked dashboards: students' outside links and the guarded daily link check |
 | `progress.py` | Who has handed in what: the submission overview and the to-do list |
 | `assistant.py` | The seminar chat: what it may read, picking sources, the shared daily AI budget |
 | `timeline.py` | Pure Python: lays class boxes out in lanes on the timeline |
@@ -234,6 +236,9 @@ Every agent has one state, shown as a coloured pill with its name (checked in th
 ### The seminar's standard outputs
 
 - **Weekly forecast** (Jimin): an output in the category `Forecast`: `{"target", "value", "unit", "market", "view", "why_changed", "evidence": [{"title", "url"}]}` (`target` and `value` required; `week` like `"2026-W46"` defaults to the week it's sent). The class's **Forecasts** tab lists every member with this week vs last; an agent's **Forecast** tab shows the weeks side by side with why it changed and the evidence.
+  `value` can also be a decision (text or true/false, e.g. `"NO"`); the Change column then says whether it changed.
+- **Data points**: a monitor named `Data points`, `{"data_points": {"<type>": [names] or count}, "debates": n, "uses": [agent names]}`, declaring the agent's current setup (not what the last run managed to fetch). Types are a fixed list (Internal values, Market prices, Company data, Economic indicators, Analyst & consensus, News & text, Alternative data, Other). `uses` adds in the data points of the same student's other agents in the class, followed through chains; a named data point used by several counts once. Shown as counts only, in the Forecasts tab's **Data points** column and the agent's **Data points** tab (after Activity), with a bar of each type's share.
+- **Linked dashboards** (Hugo's proposal): on their agent dashboard (and on an agent's page, for that agent), a student lists where their work lives outside the dashboard: URL, what it is (site, artifact, market profile, repo, document), a one-line label and who can open it (Public / Keio login / Owner only, set by the owner). Members see them; guests don't. Each link is checked when saved and once a day (in the same background loop as the market organizer): only whether it opens and when it last changed (`Last-Modified` or `<meta name="zemi:updated" content="2026-11-13">`). Two failures in a row show **Broken**; a "Public" link that answers with a login is flagged, never re-tagged. Archived links stay listed in grey. The check only reaches public addresses on ports 80/443 (the address actually connected to is checked too), follows at most 5 redirects, and reads at most 64 KB. Deleting an agent keeps its links on the student's dashboard.
 - **Debates**: outputs whose category contains "debate" appear in the agent's **Debate** tab.
 
 ---

@@ -38,6 +38,7 @@ from permissions import (
     is_enrolled,
     visible_courses,
 )
+import datapoints
 import forecasts
 import market
 import progress
@@ -414,7 +415,8 @@ def tab_context(db: Session, viewer: Viewer, course: Course, tab: str, open_skil
                 if agents else {}
             students = [cell["student"] for group in student_groups(db, viewer, course) for cell in group.cells]
             context |= {"forecast_people": forecasts.by_person(db, students, agents), "forecast_owners": owners,
-                        "forecast_states": states_for(db, agents)}
+                        "forecast_states": states_for(db, agents),
+                        "forecast_points": datapoints.breakdowns(db, agents)}
         return context
     if tab == "documents":  # the class's shared Google Drive folder (members only)
         return context | {"documents_embed": drive_folder_embed(course.documents_url) if viewer.is_member else None}

@@ -29,9 +29,10 @@ from sqlmodel import Session
 
 # Importing db also loads your .env file (see the top of db.py).
 import storage
+import links as link_check
 import market
 from db import create_db_and_tables, engine
-from routes import agent_api, agents, alumni, auth, chat, skill_upload, classes, coursework, live_feed, members, skills, skills_api
+from routes import agent_api, agents, alumni, auth, chat, skill_upload, classes, coursework, links, live_feed, members, skills, skills_api
 from web import BASE_DIR, alert_html, templates
 
 
@@ -58,6 +59,12 @@ def organize_if_due() -> None:
             print(f"Market organizer ({record.trigger}): {record.message}")
 
 
+def check_links_if_due() -> None:
+    """The daily check of students' outside links (link_check.check_due())."""
+    with Session(engine) as db:
+        link_check.check_due(db)
+
+
 async def organizer_schedule():
     """Every few minutes, run the skills market organizer if an update is due
     (15:00 JST every day; see market.due()). The first check is shortly after
@@ -68,6 +75,10 @@ async def organizer_schedule():
             await run_in_threadpool(organize_if_due)
         except Exception as error:  # noqa: BLE001 - never let the schedule stop
             print(f"Market organizer: {error}")
+        try:
+            await run_in_threadpool(check_links_if_due)
+        except Exception as error:  # noqa: BLE001 - never let the schedule stop
+            print(f"Link check: {error}")
         await asyncio.sleep(ORGANIZER_CHECK_SECONDS)
 
 
@@ -88,7 +99,7 @@ app.add_middleware(
 # The order matters where addresses look alike: e.g. POST /classes/1/agents
 # (agents.py) or /classes/1/skills (skills.py) must be found before
 # /classes/1/{assignments or exams} (coursework.py), so coursework comes last.
-for module in (auth, classes, agents, live_feed, alumni, chat, skill_upload, skills, skills_api, agent_api, members, coursework):
+for module in (auth, classes, agents, links, live_feed, alumni, chat, skill_upload, skills, skills_api, agent_api, members, coursework):
     app.include_router(module.router)
 
 

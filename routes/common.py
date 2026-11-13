@@ -11,12 +11,13 @@ import math
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, delete, select, update
 
 import market
 from db import (
     Agent,
     AgentFolder,
+    ExternalLink,
     Attachment,
     ClassVisit,
     Command,
@@ -224,6 +225,8 @@ def delete_agent(db: Session, agent: Agent) -> None:
     for model in (Event, Command, AgentFolder, NotifySetting, MonitorNotifySetting, FeedFilter, CheckInSpan,
                   SkillUpload):
         db.exec(delete(model).where(model.agent_id == agent.id))
+    # Its outside links stay on the student's dashboard, no longer tied to it.
+    db.exec(update(ExternalLink).where(ExternalLink.agent_id == agent.id).values(agent_id=None))
     # Skills it shared stay on the market, still credited to it by name.
     for skill in db.exec(select(Skill).where(Skill.agent_id == agent.id)).all():
         skill.agent_id = None
@@ -241,7 +244,7 @@ def delete_course(db: Session, course: Course) -> None:
         delete_agent(db, agent)
     market.forget_votes(db, db.exec(select(Skill.id).where(Skill.course_id == course.id)).all())
     db.exec(delete(Skill).where(Skill.course_id == course.id))
-    for model in (CourseEnrolledGen, CourseEnrolledUser, CourseHiddenGen, CourseHiddenUser, ClassVisit):
+    for model in (CourseEnrolledGen, CourseEnrolledUser, CourseHiddenGen, CourseHiddenUser, ClassVisit, ExternalLink):
         db.exec(delete(model).where(model.course_id == course.id))
     db.delete(course)
 

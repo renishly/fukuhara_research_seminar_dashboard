@@ -8,6 +8,7 @@ from db import (
     Alumnus,
     AlumnusContact,
     ChatMessage,
+    ExternalLink,
     SkillSeen,
     SkillVote,
     DATABASE_LIMIT,
@@ -179,6 +180,7 @@ def delete_member(request: Request, user_id: int, password: str = Form(""), view
     db.exec(update(Alumnus).where(Alumnus.added_by == user.id).values(added_by=None))
     for agent in db.exec(select(Agent).where(Agent.owner_id == user.id)).all():
         delete_agent(db, agent)
+    db.exec(delete(ExternalLink).where(ExternalLink.owner_id == user.id))
     for tree in db.exec(select(SkillTree).where(SkillTree.owner_id == user.id)).all():
         market.delete_tree(db, tree)
     for model, column in ((Folder, Folder.owner_id), (NotifySetting, NotifySetting.user_id),

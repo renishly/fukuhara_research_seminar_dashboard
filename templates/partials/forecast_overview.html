@@ -1,8 +1,12 @@
 {# Jimin's Level 1 (forecasts.py), per person: every student in the class,
    with one line per agent of theirs that sends forecasts (its target, this
-   week's forecast against last week's, the change), or "No forecast". An
-   agent's name opens its Forecast tab (Level 2). Members only. #}
+   week's forecast against last week's, the change), or "No forecast". A
+   forecast is a number or a decision ("NO", "Overweight"); for a decision the
+   Change says whether it changed. Data points: how many of each type the
+   forecast rests on, helper agents included (datapoints.py). An agent's name
+   opens its Forecast tab (Level 2). Members only. #}
 {% import "partials/agent_state.html" as states %}
+{% import "partials/datapoints.html" as points %}
 <section class="card" aria-labelledby="forecasts-title">
   <div class="card-body gap-3">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -12,12 +16,12 @@
     {% if forecast_people %}
     <div class="overflow-x-auto">
       <table class="table table-sm fc-table">
-        <thead><tr><th>Member</th><th>Target</th><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th><th>View</th></tr></thead>
+        <thead><tr><th>Member</th><th>Target</th><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th><th>View</th><th>Data points</th></tr></thead>
         {% for p in forecast_people %}
         <tbody>
           {% if not p.rows %}
           <tr><th scope="row">{{ "You" if p.student.id == viewer.id else who(p.student) }}</th>
-            <td colspan="6" class="text-base-content/60">No forecast</td></tr>
+            <td colspan="7" class="text-base-content/60">No forecast</td></tr>
           {% endif %}
           {% for r in p.rows %}{% set st = forecast_states.get(r.agent.id) %}
           <tr>
@@ -29,11 +33,15 @@
               <br><span class="text-xs text-base-content/70">{{ r.this.week_label }}</span></td>
             <td class="whitespace-nowrap">{% if r.last %}<span class="font-mono">{{ r.last.value | num }}</span> {{ r.last.unit }}
               <br><span class="text-xs text-base-content/70">{{ r.last.week_label }}</span>{% else %}<span class="text-base-content/60">first week</span>{% endif %}</td>
-            <td class="whitespace-nowrap">{% if r.change %}
+            <td class="whitespace-nowrap">{% if r.change and r.change.direction == "changed" %}
+              <span class="fc-change fc-changed">changed</span><br><span class="text-xs text-base-content/70">from {{ r.change.before | num }}</span>
+              {% elif r.change and "difference" not in r.change %}<span class="fc-change fc-same">= same</span>
+              {% elif r.change %}
               <span class="fc-change fc-{{ r.change.direction }}">{{ {"up": "▲", "down": "▼", "same": "="}[r.change.direction] }}
                 {{ "%+g" | format(r.change.difference | round(2)) }}{% if r.change.percent is not none %} ({{ "%+.1f" | format(r.change.percent) }}%){% endif %}</span>
               {% else %}—{% endif %}</td>
             <td>{% if r.this.view %}<span class="badge badge-outline badge-sm">{{ r.this.view }}</span>{% endif %}</td>
+            <td>{% set dp = forecast_points.get(r.agent.id) %}{% if dp %}{{ points.summary(dp) }}{% else %}<span class="text-xs text-base-content/60">not declared</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
